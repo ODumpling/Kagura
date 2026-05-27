@@ -22,6 +22,7 @@ public class AgentTask
     public int Order { get; set; }
 
     public AgentTaskStatus Status { get; set; } = AgentTaskStatus.Proposed;
+    public bool IncludeInPullRequest { get; set; } = true;
     public string? BranchName { get; set; }
     public string? WorktreePath { get; set; }
     public string? ReviewNotes { get; set; }

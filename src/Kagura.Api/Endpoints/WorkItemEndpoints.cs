@@ -46,7 +46,10 @@ public record AgentTaskDto(
     AgentTaskStatus Status,
     string? BranchName,
     string? WorktreePath,
+    bool IncludeInPullRequest,
     string? ReviewNotes = null);
+
+public record UpdateIncludeInPullRequestDto(bool IncludeInPullRequest);
 
 public record AutoReviewItemResultDto(Guid TaskId, string Title, bool AutoMerged, bool Merged, string Reasoning);
 public record AutoReviewResultDto(int Reviewed, int AutoMerged, int FlaggedForHuman, IReadOnlyList<AutoReviewItemResultDto> Items);
@@ -59,6 +62,20 @@ public record FinishWorkItemResultDto(
     int Merged,
     int AlreadyMerged,
     string? PullRequestError);
+
+public record PrPreviewResponseDto(
+    Guid WorkItemId,
+    IReadOnlyList<Guid> IncludedTaskIds,
+    string UnifiedDiff,
+    IReadOnlyList<ConflictedFileDto> ConflictedFiles,
+    string? BaseSha,
+    string? HeadSha,
+    IReadOnlyDictionary<Guid, string> TaskSnapshots,
+    PrPreviewStatsDto Stats);
+
+public record ConflictedFileDto(string Path, IReadOnlyList<Guid> TaskIds);
+
+public record PrPreviewStatsDto(int FilesChanged, int Additions, int Deletions);
 
 public static class WorkItemEndpoints
 {
@@ -91,7 +108,52 @@ public static class WorkItemEndpoints
                 w.Id, w.SourceId, w.Source.Name, w.ExternalId, w.Title, w.Body,
                 w.Status, w.Url, w.Labels, w.BranchName, w.PullRequestUrl,
                 w.UpdatedAt, w.TriagedAt,
-                w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.ReviewNotes)).ToList()));
+                w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest, t.ReviewNotes)).ToList()));
+        });
+
+        grp.MapGet("/{id:guid}/pr-preview", async (
+            Guid id,
+            KaguraDbContext db,
+            IPrPreviewService previewService,
+            [Microsoft.AspNetCore.Mvc.FromQuery] Guid[]? taskIds,
+            CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems
+                .Include(w => w.Source)
+                .Include(w => w.Tasks)
+                .FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (wi is null) return Results.NotFound();
+
+            var requested = (taskIds ?? Array.Empty<Guid>()).ToHashSet();
+            var included = wi.Tasks
+                .Where(t => requested.Contains(t.Id) && t.Status == AgentTaskStatus.AwaitingReview)
+                .OrderBy(t => t.Order)
+                .ToList();
+
+            PrPreviewResult result;
+            if (included.Count == 0)
+            {
+                result = PrPreviewResult.Empty();
+            }
+            else
+            {
+                result = await previewService.ComputePreviewAsync(wi, included, ct);
+            }
+
+            return Results.Ok(new PrPreviewResponseDto(
+                WorkItemId: wi.Id,
+                IncludedTaskIds: included.Select(t => t.Id).ToList(),
+                UnifiedDiff: result.UnifiedDiff,
+                ConflictedFiles: result.ConflictedFiles
+                    .Select(c => new ConflictedFileDto(c.Path, c.TaskIds))
+                    .ToList(),
+                BaseSha: result.BaseSha,
+                HeadSha: result.HeadSha,
+                TaskSnapshots: result.TaskSnapshots,
+                Stats: new PrPreviewStatsDto(
+                    result.Stats.FilesChanged,
+                    result.Stats.Additions,
+                    result.Stats.Deletions)));
         });
 
         grp.MapPost("/{workItemId:guid}/tasks/{taskId:guid}/merge", async (
@@ -126,7 +188,25 @@ public static class WorkItemEndpoints
             await db.SaveChangesAsync(ct);
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
 
-            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.ReviewNotes));
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest, task.ReviewNotes));
+        });
+
+        grp.MapMethods("/{workItemId:guid}/tasks/{taskId:guid}/include", new[] { "PATCH" }, async (
+            Guid workItemId,
+            Guid taskId,
+            UpdateIncludeInPullRequestDto body,
+            KaguraDbContext db,
+            CancellationToken ct) =>
+        {
+            var task = await db.AgentTasks
+                .FirstOrDefaultAsync(t => t.Id == taskId && t.WorkItemId == workItemId, ct);
+            if (task is null) return Results.NotFound();
+
+            task.IncludeInPullRequest = body.IncludeInPullRequest;
+            task.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest, task.ReviewNotes));
         });
 
         grp.MapPost("/{id:guid}/finish", async (

@@ -68,7 +68,33 @@ export interface AgentTaskDto {
   status: AgentTaskStatus;
   branchName: string | null;
   worktreePath: string | null;
+  includeInPullRequest: boolean;
   reviewNotes: string | null;
+}
+
+export interface PreviewConflict {
+  file: string;
+  taskIds: string[];
+}
+
+export interface PreviewTaskSha {
+  taskId: string;
+  sha: string;
+}
+
+export interface PreviewStats {
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface WorkItemPreview {
+  baseSha: string;
+  headSha: string;
+  unifiedDiff: string;
+  conflicts: PreviewConflict[];
+  taskShas: PreviewTaskSha[];
+  stats: PreviewStats;
 }
 
 export interface AutoReviewItemResult {

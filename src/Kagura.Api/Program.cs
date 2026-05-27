@@ -49,6 +49,8 @@ builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
 builder.Services.AddSingleton(sp =>
     new GitService(devflow["WorktreesRoot"] ?? "~/.devflow/worktrees",
         sp.GetRequiredService<ILogger<GitService>>()));
+builder.Services.AddSingleton<MergePreviewService>();
+builder.Services.AddSingleton<IPrPreviewService, GitPrPreviewService>();
 builder.Services.AddSingleton(new AgentRunnerOptions
 {
     MaxConcurrentAgents = devflow.GetValue<int?>("MaxConcurrentAgents") ?? 3,

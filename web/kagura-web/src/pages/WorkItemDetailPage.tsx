@@ -8,6 +8,7 @@ import { AgentTerminalDialog } from '@/components/AgentTerminalDialog';
 import { Markdown } from '@/components/Markdown';
 import { TaskKanban } from '@/components/TaskKanban';
 import { TaskReviewDialog } from '@/components/TaskReviewDialog';
+import { PrPreviewPanel } from '@/components/PrPreviewPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -175,6 +176,12 @@ export function WorkItemDetailPage() {
     try { await api.workItems.updateTaskStatus(item!.id, taskId, status); await reload(); }
     catch (e: any) { setError(e.message); await reload(); }
   }
+  async function toggleInclude(taskId: string, include: boolean) {
+    setItem(prev => prev ? { ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, includeInPullRequest: include } : t) } : prev);
+    setError(null);
+    try { await api.workItems.setIncludeInPullRequest(item!.id, taskId, include); }
+    catch (e: any) { setError(e.message); await reload(); }
+  }
 
   const hasProposed = item.tasks.some(t => t.status === AgentTaskStatus.Proposed);
   const hasApproved = item.tasks.some(t => t.status === AgentTaskStatus.Approved);
@@ -300,10 +307,20 @@ export function WorkItemDetailPage() {
                   onReset={resetTask}
                   onOpenTerminal={setTerminalTaskId}
                   onOpenTask={setReviewTaskId}
+                  onToggleInclude={toggleInclude}
                 />
               )}
             </CardContent>
           </Card>
+
+          <div className="mt-4">
+            <PrPreviewPanel
+              workItemId={item.id}
+              selectedTaskIds={item.tasks
+                .filter(t => t.status === AgentTaskStatus.AwaitingReview && t.includeInPullRequest)
+                .map(t => t.id)}
+            />
+          </div>
         </TabsContent>
       </Tabs>
 

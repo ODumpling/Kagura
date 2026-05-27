@@ -47,6 +47,7 @@ public class KaguraDbContext : DbContext
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).IsRequired().HasMaxLength(500);
+            e.Property(x => x.IncludeInPullRequest).HasDefaultValue(true);
             e.HasOne(x => x.WorkItem).WithMany(x => x.Tasks).HasForeignKey(x => x.WorkItemId).OnDelete(DeleteBehavior.Cascade);
         });
 

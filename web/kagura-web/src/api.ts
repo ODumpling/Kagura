@@ -1,6 +1,6 @@
 import type {
   Source, UpsertSource, WorkItemSummary, WorkItemDetail, AgentTaskDto, AgentRunDto,
-  FinishWorkItemResult, AutoReviewResult,
+  FinishWorkItemResult, WorkItemPreview, AutoReviewResult,
 } from './types';
 
 const API = import.meta.env.VITE_API ?? 'http://localhost:5253';
@@ -47,6 +47,12 @@ export const api = {
       http<void>('DELETE', `/api/workitems/${workItemId}/tasks/${taskId}`),
     mergeTask: (workItemId: string, taskId: string) =>
       http<AgentTaskDto>('POST', `/api/workitems/${workItemId}/tasks/${taskId}/merge`),
+    setIncludeInPullRequest: (workItemId: string, taskId: string, includeInPullRequest: boolean) =>
+      http<AgentTaskDto>('PATCH', `/api/workitems/${workItemId}/tasks/${taskId}/include`, { includeInPullRequest }),
+    preview: (workItemId: string, taskIds: string[]) => {
+      const qs = taskIds.map(id => `taskIds=${encodeURIComponent(id)}`).join('&');
+      return http<WorkItemPreview>('GET', `/api/workitems/${workItemId}/preview${qs ? `?${qs}` : ''}`);
+    },
     finish: (id: string) =>
       http<FinishWorkItemResult>('POST', `/api/workitems/${id}/finish`),
     autoReview: (id: string) =>
