@@ -1,17 +1,24 @@
 using System.Text.RegularExpressions;
 using Kagura.Core.Domain;
+using Kagura.Core.Merge;
 using Microsoft.Extensions.Logging;
 
 namespace Kagura.Core.Git;
 
+public enum MergeOutcome { AlreadyMerged, Merged, MergedByAgent }
+
+public record MergeResult(MergeOutcome Outcome, string? Notes = null);
+
 public partial class GitService
 {
     private readonly string _worktreesRoot;
+    private readonly IMergeConflictResolver _resolver;
     private readonly ILogger<GitService> _log;
 
-    public GitService(string worktreesRoot, ILogger<GitService> log)
+    public GitService(string worktreesRoot, IMergeConflictResolver resolver, ILogger<GitService> log)
     {
         _worktreesRoot = ResolveHome(worktreesRoot);
+        _resolver = resolver;
         _log = log;
         Directory.CreateDirectory(_worktreesRoot);
     }
@@ -35,6 +42,10 @@ public partial class GitService
 
     public string TaskWorktreePath(WorkItem wi, AgentTask task) =>
         Path.Combine(_worktreesRoot, Slug(wi.ExternalId), $"{task.Order:D2}-{Slug(task.Title, 30)}");
+
+    // Underscore prefix keeps this from colliding with any task slug (Slug() strips `_`).
+    public string WorkItemMergeWorktreePath(WorkItem wi) =>
+        Path.Combine(_worktreesRoot, Slug(wi.ExternalId), "_merge");
 
     public async Task<string> EnsureWorkItemBranchAsync(string repoPath, WorkItem wi, CancellationToken ct = default)
     {
@@ -79,25 +90,78 @@ public partial class GitService
         return worktreePath;
     }
 
-    public async Task MergeTaskBranchAsync(string repoPath, WorkItem wi, AgentTask task, CancellationToken ct = default)
+    public async Task<MergeResult> MergeTaskBranchAsync(string repoPath, WorkItem wi, AgentTask task, CancellationToken ct = default)
     {
-        var workItemBranch = WorkItemBranchName(wi);
         var taskBranch = TaskBranchName(wi, task);
+        var workItemBranch = WorkItemBranchName(wi);
 
-        var originalRef = (await ProcessRunner.RunRequiredAsync("git",
-            new[] { "rev-parse", "--abbrev-ref", "HEAD" }, repoPath, ct)).Stdout.Trim();
+        // `git diff --quiet base...head` exits 0 when head introduces no changes relative to the merge-base.
+        var diff = await ProcessRunner.RunAsync("git",
+            new[] { "diff", "--quiet", $"{workItemBranch}...{taskBranch}" }, repoPath, ct);
+        if (diff.Success)
+        {
+            _log.LogInformation("Task branch {TaskBranch} has no diff against {WorkItemBranch}; treating as already merged",
+                taskBranch, workItemBranch);
+            return new MergeResult(MergeOutcome.AlreadyMerged);
+        }
 
-        try
+        var mergePath = await EnsureWorkItemMergeWorktreeAsync(repoPath, wi, ct);
+
+        var merge = await ProcessRunner.RunAsync("git",
+            new[] { "merge", "--no-ff", "-m", $"Merge task: {task.Title}", taskBranch }, mergePath, ct);
+        if (merge.Success)
         {
-            await ProcessRunner.RunRequiredAsync("git", new[] { "checkout", workItemBranch }, repoPath, ct);
-            await ProcessRunner.RunRequiredAsync("git",
-                new[] { "merge", "--no-ff", "-m", $"Merge task: {task.Title}", taskBranch }, repoPath, ct);
-            _log.LogInformation("Merged {TaskBranch} into {WorkItemBranch}", taskBranch, workItemBranch);
+            _log.LogInformation("Merged {TaskBranch} into {WorkItemBranch} via {Path}",
+                taskBranch, workItemBranch, mergePath);
+            return new MergeResult(MergeOutcome.Merged);
         }
-        finally
+
+        // Conflict vs other failure: `git ls-files --unmerged` lists rows only when files are mid-conflict.
+        var unmerged = await ProcessRunner.RunAsync("git",
+            new[] { "ls-files", "--unmerged" }, mergePath, ct);
+        if (!unmerged.Success || string.IsNullOrWhiteSpace(unmerged.Stdout))
+            throw new InvalidOperationException(
+                $"git merge failed (no conflicts detected). stderr: {merge.Stderr.Trim()}");
+
+        _log.LogWarning("Merge of {TaskBranch} into {WorkItemBranch} hit conflicts; invoking resolver",
+            taskBranch, workItemBranch);
+
+        var resolution = await _resolver.ResolveAsync(mergePath, task.Title, ct);
+        if (resolution.Success && await IsMergeFinalizedAsync(mergePath, ct))
         {
-            await ProcessRunner.RunAsync("git", new[] { "checkout", originalRef }, repoPath, ct);
+            _log.LogInformation("Resolver finalized merge of {TaskBranch}", taskBranch);
+            return new MergeResult(MergeOutcome.MergedByAgent, resolution.Notes);
         }
+
+        throw new InvalidOperationException(
+            $"Merge of '{task.Title}' hit conflicts and the resolver could not complete it. " +
+            $"Worktree {mergePath} left in-conflict for manual resolution. Resolver notes: {resolution.Notes}");
+    }
+
+    private static async Task<bool> IsMergeFinalizedAsync(string mergePath, CancellationToken ct)
+    {
+        var mergeHead = await ProcessRunner.RunAsync("git",
+            new[] { "rev-parse", "--verify", "MERGE_HEAD" }, mergePath, ct);
+        if (mergeHead.Success) return false; // still mid-merge
+        var unmerged = await ProcessRunner.RunAsync("git",
+            new[] { "ls-files", "--unmerged" }, mergePath, ct);
+        return unmerged.Success && string.IsNullOrWhiteSpace(unmerged.Stdout);
+    }
+
+    public Task RemoveWorkItemMergeWorktreeAsync(string repoPath, WorkItem wi, CancellationToken ct = default) =>
+        RemoveWorktreeAsync(repoPath, WorkItemMergeWorktreePath(wi), ct);
+
+    private async Task<string> EnsureWorkItemMergeWorktreeAsync(string repoPath, WorkItem wi, CancellationToken ct)
+    {
+        var branch = await EnsureWorkItemBranchAsync(repoPath, wi, ct);
+        var path = WorkItemMergeWorktreePath(wi);
+
+        if (Directory.Exists(path)) return path;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await ProcessRunner.RunRequiredAsync("git", new[] { "worktree", "add", path, branch }, repoPath, ct);
+        _log.LogInformation("Created merge worktree {Path} on branch {Branch}", path, branch);
+        return path;
     }
 
     public async Task<string> DiffTaskAgainstWorkItemAsync(string repoPath, WorkItem wi, AgentTask task, CancellationToken ct = default)

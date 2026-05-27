@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Kagura.Data.Services;
 
-public record SyncResult(int Added, int Updated, int Total);
+public record SyncResult(int Added, int Updated, int Closed, int Total);
 
 public class SourceSyncService
 {
@@ -34,6 +34,10 @@ public class SourceSyncService
 
         var added = 0;
         var updated = 0;
+        var closed = 0;
+        var now = DateTime.UtcNow;
+
+        var fetchedIds = new HashSet<string>(fetched.Select(f => f.ExternalId), StringComparer.Ordinal);
 
         foreach (var f in fetched)
         {
@@ -44,7 +48,7 @@ public class SourceSyncService
                     w.Title = f.Title;
                     w.Body = f.Body;
                     w.Labels = f.Labels;
-                    w.UpdatedAt = DateTime.UtcNow;
+                    w.UpdatedAt = now;
                     updated++;
                 }
             }
@@ -63,10 +67,20 @@ public class SourceSyncService
             }
         }
 
-        source.LastSyncedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
-        _log.LogInformation("Synced source {Name}: +{Added} ~{Updated}", source.Name, added, updated);
+        // Providers return the upstream open set. Any tracked work item missing from that set
+        // was closed upstream (the linked issue/PR was closed or merged).
+        foreach (var (externalId, w) in existing)
+        {
+            if (w.Status == WorkItemStatus.Closed) continue;
+            if (fetchedIds.Contains(externalId)) continue;
+            w.MarkClosed(now);
+            closed++;
+        }
 
-        return new SyncResult(added, updated, fetched.Count);
+        source.LastSyncedAt = now;
+        await _db.SaveChangesAsync(ct);
+        _log.LogInformation("Synced source {Name}: +{Added} ~{Updated} -{Closed}", source.Name, added, updated, closed);
+
+        return new SyncResult(added, updated, closed, fetched.Count);
     }
 }

@@ -1,7 +1,9 @@
 using Kagura.Api.Endpoints;
+using Kagura.Api.HostedServices;
 using Kagura.Api.Hubs;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
+using Kagura.Core.Merge;
 using Kagura.Core.Review;
 using Kagura.Core.Sources;
 using Kagura.Core.Triage;
@@ -46,8 +48,16 @@ builder.Services.Configure<ReviewOptions>(opt =>
 });
 builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
 
+builder.Services.Configure<MergeResolverOptions>(opt =>
+{
+    opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+    opt.Model = builder.Configuration["MergeResolver:Model"];
+});
+builder.Services.AddSingleton<IMergeConflictResolver, ClaudeCliMergeResolver>();
+
 builder.Services.AddSingleton(sp =>
     new GitService(devflow["WorktreesRoot"] ?? "~/.devflow/worktrees",
+        sp.GetRequiredService<IMergeConflictResolver>(),
         sp.GetRequiredService<ILogger<GitService>>()));
 builder.Services.AddSingleton<MergePreviewService>();
 builder.Services.AddSingleton<IPrPreviewService, GitPrPreviewService>();
@@ -61,6 +71,14 @@ builder.Services.AddSingleton(new AgentRunnerOptions
 });
 builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
 builder.Services.AddSingleton<IAgentRunner, AgentRunner>();
+
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(new WorkItemCleanupOptions
+{
+    Interval = devflow.GetValue<TimeSpan?>("WorkItemCleanup:Interval") ?? TimeSpan.FromHours(1),
+    Retention = devflow.GetValue<TimeSpan?>("WorkItemCleanup:Retention") ?? TimeSpan.FromDays(7),
+});
+builder.Services.AddHostedService<WorkItemCleanupService>();
 
 builder.Services.AddOpenApi();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
