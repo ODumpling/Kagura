@@ -4,6 +4,20 @@ A local devflow app that pulls issues from your trackers (GitHub, Azure DevOps, 
 
 Single-user, local-only. No auth. Built for one developer's workstation.
 
+## Documentation
+
+Full setup and usage guides are published at **<https://ODumpling.github.io/Kagura/>**.
+
+The site lives in [`docs/`](docs/) and is built with Docusaurus. To contribute, edit the Markdown under `docs/docs/` (e.g. `docs/docs/setup.md`, `docs/docs/usage.md`) and preview locally:
+
+```bash
+cd docs
+npm install   # first time only
+npm run start # serves the site at http://localhost:3000 with live reload
+```
+
+Open a PR with your changes — the docs site rebuilds and redeploys from `main` via GitHub Actions.
+
 ## Architecture
 
 ```
