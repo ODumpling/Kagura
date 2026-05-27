@@ -64,6 +64,10 @@ export const api = {
       http<FinishWorkItemResult>('POST', `/api/workitems/${id}/finish`),
     autoReview: (id: string) =>
       http<AutoReviewResult>('POST', `/api/workitems/${id}/auto-review`),
+    ralphLoopStart: (id: string) =>
+      http<void>('POST', `/api/workitems/${id}/ralph-loop`),
+    ralphLoopCancel: (id: string) =>
+      http<void>('POST', `/api/workitems/${id}/ralph-loop/cancel`),
   },
 
   agents: {

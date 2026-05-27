@@ -26,6 +26,8 @@ public class AgentTask
     public string? BranchName { get; set; }
     public string? WorktreePath { get; set; }
     public string? ReviewNotes { get; set; }
+    public int RetryAttempts { get; set; }
+    public string? LastFailureReason { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

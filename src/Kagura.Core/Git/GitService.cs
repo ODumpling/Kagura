@@ -180,6 +180,20 @@ public partial class GitService
         if (!r.Success) _log.LogWarning("Failed to remove worktree {Path}: {Stderr}", worktreePath, r.Stderr);
     }
 
+    // Clean-slate reset for the Ralph-loop retry path: drop the task's worktree and
+    // delete the task branch so the next CreateTaskWorktreeAsync starts fresh from the work-item branch.
+    public async Task ResetTaskBranchAsync(string repoPath, WorkItem wi, AgentTask task, CancellationToken ct = default)
+    {
+        var worktreePath = TaskWorktreePath(wi, task);
+        if (Directory.Exists(worktreePath))
+            await RemoveWorktreeAsync(repoPath, worktreePath, ct);
+
+        var taskBranch = TaskBranchName(wi, task);
+        var del = await ProcessRunner.RunAsync("git", new[] { "branch", "-D", taskBranch }, repoPath, ct);
+        if (!del.Success)
+            _log.LogWarning("Failed to delete task branch {Branch}: {Stderr}", taskBranch, del.Stderr);
+    }
+
     public async Task<string?> OpenPullRequestAsync(string repoPath, WorkItem wi, CancellationToken ct = default)
     {
         var branch = WorkItemBranchName(wi);

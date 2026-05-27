@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch } from 'lucide-react';
+import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch, Bot, OctagonX, AlertTriangle } from 'lucide-react';
 import { api } from '@/api';
 import { getConnection } from '@/signalr';
 import { type AgentRunDto, AgentTaskStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
@@ -177,6 +177,20 @@ export function WorkItemDetailPage() {
     try { await api.workItems.updateTaskStatus(item!.id, taskId, status); await reload(); }
     catch (e: any) { setError(e.message); await reload(); }
   }
+  async function startRalphLoop() {
+    if (!item) return;
+    setBusy('ralph-start'); setError(null);
+    try { await api.workItems.ralphLoopStart(item.id); await reload(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+  async function cancelRalphLoop() {
+    if (!item) return;
+    setBusy('ralph-cancel'); setError(null);
+    try { await api.workItems.ralphLoopCancel(item.id); await reload(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
   async function toggleInclude(taskId: string, include: boolean) {
     setItem(prev => prev ? { ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, includeInPullRequest: include } : t) } : prev);
     setError(null);
@@ -193,6 +207,35 @@ export function WorkItemDetailPage() {
   const isClosed = item.status === WorkItemStatus.Closed;
   const canFinish = !hasRunning && (reviewable > 0 || mergedCount > 0) && item.status !== WorkItemStatus.PullRequested && !isClosed;
 
+  const ralphActive = item.ralphLoopActive;
+  const ralphTaskCountOk = item.tasks.length > 0 && item.tasks.length <= 3;
+  const allMerged = item.tasks.length > 0 && item.tasks.every(t => t.status === AgentTaskStatus.Merged);
+  const canShowRalph =
+    !isClosed &&
+    item.status !== WorkItemStatus.PullRequested &&
+    item.tasks.length > 0 &&
+    !allMerged &&
+    (item.status === WorkItemStatus.Triaged || item.status === WorkItemStatus.InProgress);
+  const ralphDisabledTooltip = !ralphTaskCountOk
+    ? `Ralph Loop supports up to 3 tasks per work item; this one has ${item.tasks.length}.`
+    : undefined;
+
+  const ralphCurrent = (() => {
+    if (!ralphActive) return null;
+    const running = item.tasks.find(t => t.status === AgentTaskStatus.Running);
+    if (running) return { label: `Running task '${running.title}'`, attempt: running.retryAttempts + 1 };
+    const review = item.tasks
+      .filter(t => t.status === AgentTaskStatus.AwaitingReview)
+      .sort((a, b) => a.order - b.order)[0];
+    if (review) return { label: `Merging task '${review.title}'`, attempt: review.retryAttempts + 1 };
+    if (item.tasks.every(t => t.status === AgentTaskStatus.Merged)) return { label: 'Opening pull request…', attempt: 1 };
+    const next = item.tasks
+      .filter(t => t.status === AgentTaskStatus.Approved)
+      .sort((a, b) => a.order - b.order)[0];
+    if (next) return { label: `Starting task '${next.title}'`, attempt: next.retryAttempts + 1 };
+    return { label: 'Working…', attempt: 1 };
+  })();
+
   return (
     <div className="flex flex-1 flex-col gap-6 min-h-0">
       <div className="flex justify-between items-start">
@@ -208,49 +251,76 @@ export function WorkItemDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={runTriage}
-            disabled={busy !== null || isClosed}
-            title={isClosed ? 'Work item is closed' : undefined}
-          >
-            {busy === 'triage' ? <Loader2 className="animate-spin" /> : <Sparkles />}
-            {busy === 'triage' ? 'Triaging…' : 'Triage'}
-          </Button>
-          {hasProposed && (
-            <Button onClick={approveAll} disabled={busy !== null}>
-              {busy === 'approve' ? <Loader2 className="animate-spin" /> : <CheckCheck />}
-              {busy === 'approve' ? 'Approving…' : 'Approve all'}
+          {ralphActive ? (
+            <Button
+              variant="destructive"
+              onClick={cancelRalphLoop}
+              disabled={busy !== null}
+            >
+              {busy === 'ralph-cancel' ? <Loader2 className="animate-spin" /> : <OctagonX />}
+              {busy === 'ralph-cancel' ? 'Cancelling…' : 'Cancel Ralph Loop'}
             </Button>
-          )}
-          {hasApproved && (
-            <Button onClick={startAll} disabled={busy !== null}>
-              {busy === 'start-all' ? <Loader2 className="animate-spin" /> : <Play />}
-              {busy === 'start-all' ? 'Queuing…' : 'Start all'}
-            </Button>
-          )}
-          {hasReview && (
-            <Button variant="outline" onClick={autoReview} disabled={busy !== null}>
-              {busy === 'auto-review' ? <Loader2 className="animate-spin" /> : <ScanSearch />}
-              {busy === 'auto-review' ? 'Reviewing…' : 'Auto-review'}
-            </Button>
-          )}
-          {canFinish && (
-            <Button onClick={finishWorkItem} disabled={busy !== null}>
-              {busy === 'finish' ? <Loader2 className="animate-spin" /> : <GitPullRequest />}
-              {busy === 'finish'
-                ? 'Finishing…'
-                : reviewable > 0
-                  ? `Finish (merge ${reviewable} + PR)`
-                  : 'Open PR'}
-            </Button>
-          )}
-          {item.pullRequestUrl && (
-            <Button variant="outline" asChild>
-              <a href={item.pullRequestUrl} target="_blank" rel="noreferrer">
-                <ExternalLink /> View PR
-              </a>
-            </Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                onClick={runTriage}
+                disabled={busy !== null || isClosed}
+                title={isClosed ? 'Work item is closed' : undefined}
+              >
+                {busy === 'triage' ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                {busy === 'triage' ? 'Triaging…' : 'Triage'}
+              </Button>
+              {canShowRalph && (
+                <Button
+                  onClick={startRalphLoop}
+                  disabled={busy !== null || !ralphTaskCountOk}
+                  title={ralphDisabledTooltip}
+                >
+                  {busy === 'ralph-start' ? <Loader2 className="animate-spin" /> : <Bot />}
+                  {busy === 'ralph-start'
+                    ? 'Starting…'
+                    : item.ralphLoopHaltReason
+                      ? 'Retry Ralph Loop'
+                      : 'Ralph Loop'}
+                </Button>
+              )}
+              {hasProposed && (
+                <Button variant="outline" onClick={approveAll} disabled={busy !== null}>
+                  {busy === 'approve' ? <Loader2 className="animate-spin" /> : <CheckCheck />}
+                  {busy === 'approve' ? 'Approving…' : 'Approve all'}
+                </Button>
+              )}
+              {hasApproved && (
+                <Button variant="outline" onClick={startAll} disabled={busy !== null}>
+                  {busy === 'start-all' ? <Loader2 className="animate-spin" /> : <Play />}
+                  {busy === 'start-all' ? 'Queuing…' : 'Start all'}
+                </Button>
+              )}
+              {hasReview && (
+                <Button variant="outline" onClick={autoReview} disabled={busy !== null}>
+                  {busy === 'auto-review' ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+                  {busy === 'auto-review' ? 'Reviewing…' : 'Auto-review'}
+                </Button>
+              )}
+              {canFinish && (
+                <Button variant="outline" onClick={finishWorkItem} disabled={busy !== null}>
+                  {busy === 'finish' ? <Loader2 className="animate-spin" /> : <GitPullRequest />}
+                  {busy === 'finish'
+                    ? 'Finishing…'
+                    : reviewable > 0
+                      ? `Finish (merge ${reviewable} + PR)`
+                      : 'Open PR'}
+                </Button>
+              )}
+              {item.pullRequestUrl && (
+                <Button variant="outline" asChild>
+                  <a href={item.pullRequestUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink /> View PR
+                  </a>
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -258,6 +328,25 @@ export function WorkItemDetailPage() {
       {error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
           {error}
+        </div>
+      )}
+
+      {ralphActive && ralphCurrent && (
+        <div className="rounded-md border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-sm flex items-center gap-2">
+          <Bot className="size-4 animate-pulse" />
+          <span className="font-medium">Ralph Loop:</span>
+          <span>{ralphCurrent.label}</span>
+          <span className="text-muted-foreground text-xs">attempt {ralphCurrent.attempt}/3</span>
+        </div>
+      )}
+
+      {!ralphActive && item.ralphLoopHaltReason && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm flex items-start gap-2">
+          <AlertTriangle className="size-4 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium">Ralph Loop halted</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{item.ralphLoopHaltReason}</div>
+          </div>
         </div>
       )}
 

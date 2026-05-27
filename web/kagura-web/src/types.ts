@@ -59,6 +59,8 @@ export interface WorkItemSummary {
   updatedAt: string;
   triagedAt: string | null;
   taskCount: number;
+  ralphLoopActive: boolean;
+  ralphLoopHaltReason: string | null;
 }
 
 export interface AgentTaskDto {
@@ -71,6 +73,8 @@ export interface AgentTaskDto {
   worktreePath: string | null;
   includeInPullRequest: boolean;
   reviewNotes: string | null;
+  retryAttempts: number;
+  lastFailureReason: string | null;
 }
 
 export interface PreviewConflict {
