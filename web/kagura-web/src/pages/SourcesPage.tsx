@@ -1,7 +1,20 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
-import { type Source, type UpsertSource, SourceType, SourceTypeLabel } from '../types';
-import { btn, btnDanger, card, errorBox, input, label, muted, tableClass, tdClass, thClass } from '../ui';
+import { useSearchParams } from 'react-router-dom';
+import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { api } from '@/api';
+import { type UpsertSource, SourceType, SourceTypeLabel } from '@/types';
+import { useSources } from '@/contexts/SourcesContext';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 
 const blankSource = (): UpsertSource => ({
   name: '',
@@ -21,13 +34,19 @@ function defaultConfigFor(type: SourceType): Record<string, unknown> {
 }
 
 export function SourcesPage() {
-  const [sources, setSources] = useState<Source[]>([]);
+  const { sources, refresh } = useSources();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [editing, setEditing] = useState<{ id?: string; draft: UpsertSource } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function reload() { setSources(await api.sources.list()); }
-  useEffect(() => { reload().catch(e => setError(e.message)); }, []);
+  useEffect(() => {
+    if (searchParams.get('new') === '1' && !editing) {
+      setEditing({ draft: blankSource() });
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, editing]);
 
   async function save() {
     if (!editing) return;
@@ -36,20 +55,13 @@ export function SourcesPage() {
       if (editing.id) await api.sources.update(editing.id, editing.draft);
       else await api.sources.create(editing.draft);
       setEditing(null);
-      await reload();
+      await refresh();
     } catch (e: any) { setError(e.message); }
   }
 
   async function syncOne(id: string) {
     setBusy(id); setError(null);
-    try { await api.sources.sync(id); await reload(); }
-    catch (e: any) { setError(e.message); }
-    finally { setBusy(null); }
-  }
-
-  async function syncAll() {
-    setBusy('all'); setError(null);
-    try { await api.sources.syncAll(); await reload(); }
+    try { await api.sources.sync(id); await refresh(); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
@@ -57,107 +69,134 @@ export function SourcesPage() {
   async function remove(id: string) {
     if (!confirm('Delete this source? WorkItems are removed too.')) return;
     setError(null);
-    try { await api.sources.remove(id); await reload(); }
+    try { await api.sources.remove(id); await refresh(); }
     catch (e: any) { setError(e.message); }
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-start mb-4">
-        <h2 className="text-xl font-semibold m-0">Sources</h2>
-        <div className="flex gap-2">
-          <button className={btn} onClick={() => setEditing({ draft: blankSource() })}>+ Add source</button>
-          <button className={btn} onClick={syncAll} disabled={busy !== null}>Sync all</button>
+    <div className="space-y-4">
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Sources</h1>
+          <p className="text-sm text-muted-foreground">Trackers and repos Kagura pulls issues from.</p>
         </div>
+        <Button onClick={() => setEditing({ draft: blankSource() })}>
+          <Plus /> Add source
+        </Button>
       </div>
 
-      {error && <div className={errorBox}>{error}</div>}
-
-      <div className={`${card} overflow-hidden`}>
-        <table className={tableClass}>
-          <thead>
-            <tr>
-              <th className={thClass}>Name</th>
-              <th className={thClass}>Type</th>
-              <th className={thClass}>Repo</th>
-              <th className={thClass}>Last synced</th>
-              <th className={thClass}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {sources.map(s => (
-              <tr key={s.id}>
-                <td className={tdClass}>
-                  <strong>{s.name}</strong>{' '}
-                  {!s.enabled && <span className={muted}>(disabled)</span>}
-                </td>
-                <td className={tdClass}>{SourceTypeLabel[s.type]}</td>
-                <td className={`${tdClass} ${muted}`}>{s.localRepoPath}</td>
-                <td className={`${tdClass} ${muted}`}>
-                  {s.lastSyncedAt ? new Date(s.lastSyncedAt).toLocaleString() : '—'}
-                </td>
-                <td className={`${tdClass} space-x-2 whitespace-nowrap`}>
-                  <button className={btn} onClick={() => syncOne(s.id)} disabled={busy === s.id}>Sync</button>
-                  <button className={btn} onClick={() => setEditing({ id: s.id, draft: { name: s.name, type: s.type, localRepoPath: s.localRepoPath, config: s.config, enabled: s.enabled } })}>Edit</button>
-                  <button className={btnDanger} onClick={() => remove(s.id)}>Delete</button>
-                </td>
-              </tr>
-            ))}
-            {sources.length === 0 && (
-              <tr><td colSpan={5} className={`${tdClass} ${muted} text-center py-6`}>No sources yet.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {editing && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className={`${card} p-5 w-[520px] max-w-[90vw] max-h-[90vh] overflow-auto`}>
-            <h3 className="text-lg font-semibold mt-0 mb-3">{editing.id ? 'Edit source' : 'New source'}</h3>
-
-            <label className={label}>Name
-              <input className={input} value={editing.draft.name}
-                onChange={e => setEditing({ ...editing, draft: { ...editing.draft, name: e.target.value } })} />
-            </label>
-
-            <label className={label}>Type
-              <select className={input} value={editing.draft.type}
-                onChange={e => {
-                  const type = Number(e.target.value) as SourceType;
-                  setEditing({ ...editing, draft: { ...editing.draft, type, config: defaultConfigFor(type) } });
-                }}>
-                {Object.entries(SourceTypeLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </label>
-
-            <label className={label}>Local repo path
-              <input className={input} value={editing.draft.localRepoPath}
-                onChange={e => setEditing({ ...editing, draft: { ...editing.draft, localRepoPath: e.target.value } })}
-                placeholder="/Users/you/Code/repo" />
-            </label>
-
-            <label className={label}>Config (JSON)
-              <textarea className={`${input} font-mono`} rows={6}
-                value={JSON.stringify(editing.draft.config, null, 2)}
-                onChange={e => {
-                  try { setEditing({ ...editing, draft: { ...editing.draft, config: JSON.parse(e.target.value) } }); }
-                  catch { /* keep typing */ }
-                }} />
-            </label>
-
-            <label className="flex items-center gap-2 my-3 text-sm text-slate-300">
-              <input type="checkbox" checked={editing.draft.enabled}
-                onChange={e => setEditing({ ...editing, draft: { ...editing.draft, enabled: e.target.checked } })} />
-              Enabled
-            </label>
-
-            <div className="flex gap-2 justify-end mt-4">
-              <button className={btn} onClick={() => setEditing(null)}>Cancel</button>
-              <button className={btn} onClick={save}>Save</button>
-            </div>
-          </div>
+      {error && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground">
+          {error}
         </div>
       )}
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Repo</TableHead>
+                <TableHead>Last synced</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sources.map(s => (
+                <TableRow key={s.id}>
+                  <TableCell>
+                    <div className="font-medium">{s.name}</div>
+                    {!s.enabled && <span className="text-xs text-muted-foreground">disabled</span>}
+                  </TableCell>
+                  <TableCell>{SourceTypeLabel[s.type]}</TableCell>
+                  <TableCell className="text-muted-foreground font-mono text-xs">{s.localRepoPath}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {s.lastSyncedAt ? new Date(s.lastSyncedAt).toLocaleString() : '—'}
+                  </TableCell>
+                  <TableCell className="text-right space-x-2 whitespace-nowrap">
+                    <Button variant="outline" size="sm" onClick={() => syncOne(s.id)} disabled={busy === s.id}>
+                      <RefreshCw className={busy === s.id ? 'animate-spin' : ''} /> Sync
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setEditing({
+                      id: s.id,
+                      draft: { name: s.name, type: s.type, localRepoPath: s.localRepoPath, config: s.config, enabled: s.enabled },
+                    })}>Edit</Button>
+                    <Button variant="ghost" size="sm" onClick={() => remove(s.id)} className="text-destructive">
+                      <Trash2 />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {sources.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                    No sources yet.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>{editing?.id ? 'Edit source' : 'New source'}</DialogTitle>
+          </DialogHeader>
+          {editing && (
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="name">Name</Label>
+                <Input id="name" value={editing.draft.name}
+                  onChange={e => setEditing({ ...editing, draft: { ...editing.draft, name: e.target.value } })} />
+              </div>
+              <div>
+                <Label>Type</Label>
+                <Select
+                  value={String(editing.draft.type)}
+                  onValueChange={(v) => {
+                    const type = Number(v) as SourceType;
+                    setEditing({ ...editing, draft: { ...editing.draft, type, config: defaultConfigFor(type) } });
+                  }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(SourceTypeLabel).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="repo">Local repo path</Label>
+                <Input id="repo" placeholder="/Users/you/Code/repo" value={editing.draft.localRepoPath}
+                  onChange={e => setEditing({ ...editing, draft: { ...editing.draft, localRepoPath: e.target.value } })} />
+              </div>
+              <div>
+                <Label htmlFor="config">Config (JSON)</Label>
+                <Textarea id="config" rows={6} className="font-mono text-xs"
+                  value={JSON.stringify(editing.draft.config, null, 2)}
+                  onChange={e => {
+                    try { setEditing({ ...editing, draft: { ...editing.draft, config: JSON.parse(e.target.value) } }); }
+                    catch { /* keep typing */ }
+                  }} />
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch id="enabled" checked={editing.draft.enabled}
+                  onCheckedChange={(checked) => setEditing({ ...editing, draft: { ...editing.draft, enabled: checked } })} />
+                <Label htmlFor="enabled">Enabled</Label>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button onClick={save}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

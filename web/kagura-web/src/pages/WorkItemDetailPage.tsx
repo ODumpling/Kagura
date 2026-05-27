@@ -1,9 +1,34 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { api } from '../api';
-import { type AgentRunDto, AgentTaskStatus, AgentTaskStatusLabel, type WorkItemDetail, WorkItemStatusLabel } from '../types';
-import { AgentTerminal } from '../components/AgentTerminal';
-import { btn, btnDanger, btnTab, card, errorBox, muted, taskBadge, workItemBadge } from '../ui';
+import { Play, Square, Terminal as TerminalIcon, Sparkles, CheckCheck } from 'lucide-react';
+import { api } from '@/api';
+import { type AgentRunDto, AgentTaskStatus, AgentTaskStatusLabel, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
+import { AgentTerminal } from '@/components/AgentTerminal';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
+
+const wiStatusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline'> = {
+  [WorkItemStatus.New]: 'outline',
+  [WorkItemStatus.Triaged]: 'secondary',
+  [WorkItemStatus.InProgress]: 'default',
+  [WorkItemStatus.Merged]: 'default',
+  [WorkItemStatus.PullRequested]: 'default',
+  [WorkItemStatus.Done]: 'default',
+  [WorkItemStatus.Cancelled]: 'outline',
+};
+
+const taskStatusVariant: Record<AgentTaskStatus, 'secondary' | 'default' | 'outline' | 'destructive'> = {
+  [AgentTaskStatus.Proposed]: 'outline',
+  [AgentTaskStatus.Approved]: 'secondary',
+  [AgentTaskStatus.Running]: 'default',
+  [AgentTaskStatus.AwaitingReview]: 'secondary',
+  [AgentTaskStatus.Merged]: 'default',
+  [AgentTaskStatus.Failed]: 'destructive',
+  [AgentTaskStatus.Cancelled]: 'outline',
+};
 
 export function WorkItemDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -28,7 +53,11 @@ export function WorkItemDetailPage() {
     }).catch(() => {});
   }, [item?.id]);
 
-  if (!item) return <div>{error ? <div className={errorBox}>{error}</div> : <span className={muted}>Loading…</span>}</div>;
+  if (!item) {
+    return error
+      ? <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">{error}</div>
+      : <div className="text-muted-foreground text-sm">Loading…</div>;
+  }
 
   async function runTriage() {
     setBusy('triage'); setError(null);
@@ -63,93 +92,119 @@ export function WorkItemDetailPage() {
   const hasProposed = item.tasks.some(t => t.status === AgentTaskStatus.Proposed);
 
   return (
-    <div>
-      <div className="flex justify-between items-start mb-4">
+    <div className="space-y-6">
+      <div className="flex justify-between items-start">
         <div>
-          <div className={`${muted} text-sm`}>
+          <div className="text-sm text-muted-foreground">
             {item.sourceName} ·{' '}
-            <code className="px-1.5 py-0.5 rounded bg-slate-800 text-xs">{item.externalId}</code>
+            <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{item.externalId}</code>
           </div>
-          <h2 className="text-2xl font-semibold mt-1 mb-2">{item.title}</h2>
-          <span className={workItemBadge(item.status)}>{WorkItemStatusLabel[item.status]}</span>
-          {item.labels && <span className={`${muted} text-xs ml-2`}>· {item.labels}</span>}
+          <h1 className="text-2xl font-semibold tracking-tight mt-1">{item.title}</h1>
+          <div className="flex items-center gap-2 mt-2">
+            <Badge variant={wiStatusVariant[item.status]}>{WorkItemStatusLabel[item.status]}</Badge>
+            {item.labels && <span className="text-xs text-muted-foreground">{item.labels}</span>}
+          </div>
         </div>
         <div className="flex gap-2">
-          <button className={btn} onClick={runTriage} disabled={busy !== null}>Triage</button>
-          {hasProposed && <button className={btn} onClick={approveAll} disabled={busy !== null}>Approve all</button>}
+          <Button variant="outline" onClick={runTriage} disabled={busy !== null}>
+            <Sparkles /> Triage
+          </Button>
+          {hasProposed && (
+            <Button onClick={approveAll} disabled={busy !== null}>
+              <CheckCheck /> Approve all
+            </Button>
+          )}
         </div>
       </div>
 
-      {error && <div className={errorBox}>{error}</div>}
+      {error && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
+          {error}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section>
-          <h3 className="text-sm uppercase tracking-wider text-slate-400 mb-2">Body</h3>
-          <pre className={`${card} p-3 whitespace-pre-wrap font-mono text-xs max-h-80 overflow-auto`}>
-            {item.body}
-          </pre>
-        </section>
+        <Card>
+          <CardHeader><CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Body</CardTitle></CardHeader>
+          <CardContent>
+            <ScrollArea className="h-72 rounded-md border bg-muted/30 p-3">
+              <pre className="text-xs font-mono whitespace-pre-wrap">{item.body || '(empty)'}</pre>
+            </ScrollArea>
+          </CardContent>
+        </Card>
 
-        <section>
-          <h3 className="text-sm uppercase tracking-wider text-slate-400 mb-2">Tasks</h3>
-          {item.tasks.length === 0 && (
-            <div className={muted}>No tasks yet. Run triage to propose them.</div>
-          )}
-          <ol className="space-y-2 list-none p-0">
+        <Card>
+          <CardHeader><CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Tasks</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {item.tasks.length === 0 && (
+              <div className="text-sm text-muted-foreground">No tasks yet. Run triage to propose them.</div>
+            )}
             {item.tasks.map(t => {
               const run = runs[t.id];
               const canStart = t.status === AgentTaskStatus.Approved || t.status === AgentTaskStatus.AwaitingReview;
               return (
-                <li key={t.id} className={`${card} p-3`}>
+                <div key={t.id} className="rounded-md border p-3">
                   <div className="flex justify-between items-center gap-2">
-                    <strong className="text-slate-100">{t.order}. {t.title}</strong>
-                    <span className={taskBadge(t.status)}>{AgentTaskStatusLabel[t.status]}</span>
+                    <strong className="text-sm">{t.order}. {t.title}</strong>
+                    <Badge variant={taskStatusVariant[t.status]}>{AgentTaskStatusLabel[t.status]}</Badge>
                   </div>
-                  <p className={`${muted} text-sm my-2`}>{t.description}</p>
+                  <p className="text-sm text-muted-foreground my-2">{t.description}</p>
                   <div className="flex gap-2">
                     {canStart && !run && (
-                      <button className={btn} onClick={() => startTask(t.id)} disabled={busy === t.id}>
-                        Start agent
-                      </button>
+                      <Button size="sm" onClick={() => startTask(t.id)} disabled={busy === t.id}>
+                        <Play /> Start agent
+                      </Button>
                     )}
                     {run && (
                       <>
-                        <button className={btn} onClick={() => setActiveTab(t.id)}>Open terminal</button>
-                        <button className={btnDanger} onClick={() => stopRun(t.id)} disabled={busy === t.id}>Stop</button>
+                        <Button variant="outline" size="sm" onClick={() => setActiveTab(t.id)}>
+                          <TerminalIcon /> Open terminal
+                        </Button>
+                        <Button variant="ghost" size="sm" className="text-destructive"
+                          onClick={() => stopRun(t.id)} disabled={busy === t.id}>
+                          <Square /> Stop
+                        </Button>
                       </>
                     )}
                   </div>
-                </li>
+                </div>
               );
             })}
-          </ol>
-        </section>
+          </CardContent>
+        </Card>
       </div>
 
       {Object.keys(runs).length > 0 && (
-        <section className="mt-8 pt-4 border-t border-slate-700">
-          <div className="flex gap-1 flex-wrap mb-2">
-            {Object.entries(runs).map(([taskId, run]) => {
-              const task = item.tasks.find(t => t.id === taskId);
-              return (
-                <button
-                  key={taskId}
-                  onClick={() => setActiveTab(taskId)}
-                  className={btnTab(activeTab === taskId)}
-                >
-                  {task?.title ?? run.runId.slice(0, 8)}
-                </button>
-              );
-            })}
-          </div>
-          {activeTab && runs[activeTab] && (
-            <AgentTerminal
-              key={runs[activeTab].runId}
-              runId={runs[activeTab].runId}
-              onExit={() => reload()}
-            />
-          )}
-        </section>
+        <>
+          <Separator />
+          <Card>
+            <CardHeader><CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Active agents</CardTitle></CardHeader>
+            <CardContent>
+              <div className="flex gap-1 flex-wrap mb-3">
+                {Object.entries(runs).map(([taskId, run]) => {
+                  const task = item.tasks.find(t => t.id === taskId);
+                  return (
+                    <Button
+                      key={taskId}
+                      variant={activeTab === taskId ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setActiveTab(taskId)}
+                    >
+                      {task?.title ?? run.runId.slice(0, 8)}
+                    </Button>
+                  );
+                })}
+              </div>
+              {activeTab && runs[activeTab] && (
+                <AgentTerminal
+                  key={runs[activeTab].runId}
+                  runId={runs[activeTab].runId}
+                  onExit={() => reload()}
+                />
+              )}
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );
