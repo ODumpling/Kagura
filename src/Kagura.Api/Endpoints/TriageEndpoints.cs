@@ -22,6 +22,8 @@ public static class TriageEndpoints
         {
             var wi = await db.WorkItems.Include(w => w.Tasks).FirstOrDefaultAsync(w => w.Id == workItemId, ct);
             if (wi is null) return Results.NotFound();
+            if (wi.Status == WorkItemStatus.Closed)
+                return Results.BadRequest(new { error = "Work item is closed." });
 
             var existingProposed = wi.Tasks.Where(t => t.Status == AgentTaskStatus.Proposed).ToList();
             db.AgentTasks.RemoveRange(existingProposed);

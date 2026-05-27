@@ -23,6 +23,7 @@ const wiStatusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline
   [WorkItemStatus.PullRequested]: 'default',
   [WorkItemStatus.Done]: 'default',
   [WorkItemStatus.Cancelled]: 'outline',
+  [WorkItemStatus.Closed]: 'secondary',
 };
 
 export function WorkItemDetailPage() {
@@ -189,7 +190,8 @@ export function WorkItemDetailPage() {
   const hasReview = item.tasks.some(t => t.status === AgentTaskStatus.AwaitingReview);
   const reviewable = item.tasks.filter(t => t.status === AgentTaskStatus.AwaitingReview).length;
   const mergedCount = item.tasks.filter(t => t.status === AgentTaskStatus.Merged).length;
-  const canFinish = !hasRunning && (reviewable > 0 || mergedCount > 0) && item.status !== WorkItemStatus.PullRequested;
+  const isClosed = item.status === WorkItemStatus.Closed;
+  const canFinish = !hasRunning && (reviewable > 0 || mergedCount > 0) && item.status !== WorkItemStatus.PullRequested && !isClosed;
 
   return (
     <div className="flex flex-1 flex-col gap-6 min-h-0">
@@ -206,7 +208,12 @@ export function WorkItemDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={runTriage} disabled={busy !== null}>
+          <Button
+            variant="outline"
+            onClick={runTriage}
+            disabled={busy !== null || isClosed}
+            title={isClosed ? 'Work item is closed' : undefined}
+          >
             {busy === 'triage' ? <Loader2 className="animate-spin" /> : <Sparkles />}
             {busy === 'triage' ? 'Triaging…' : 'Triage'}
           </Button>

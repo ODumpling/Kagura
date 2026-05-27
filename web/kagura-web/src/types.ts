@@ -13,6 +13,7 @@ export enum WorkItemStatus {
   PullRequested = 4,
   Done = 5,
   Cancelled = 6,
+  Closed = 7,
 }
 
 export enum AgentTaskStatus {
@@ -153,6 +154,7 @@ export const WorkItemStatusLabel: Record<WorkItemStatus, string> = {
   [WorkItemStatus.PullRequested]: 'PR Open',
   [WorkItemStatus.Done]: 'Done',
   [WorkItemStatus.Cancelled]: 'Cancelled',
+  [WorkItemStatus.Closed]: 'Closed',
 };
 
 export const AgentTaskStatusLabel: Record<AgentTaskStatus, string> = {

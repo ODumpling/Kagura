@@ -224,6 +224,8 @@ public static class WorkItemEndpoints
                 .Include(w => w.Tasks)
                 .FirstOrDefaultAsync(w => w.Id == id, ct);
             if (wi is null) return Results.NotFound();
+            if (wi.Status == WorkItemStatus.Closed)
+                return Results.BadRequest(new { error = "Work item is closed." });
 
             if (wi.Tasks.Any(t => t.Status == AgentTaskStatus.Running))
                 return Results.BadRequest(new { error = "Stop all running agents before finishing this work item." });

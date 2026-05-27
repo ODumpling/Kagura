@@ -17,6 +17,7 @@ const statusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline' 
   [WorkItemStatus.PullRequested]: 'default',
   [WorkItemStatus.Done]: 'default',
   [WorkItemStatus.Cancelled]: 'outline',
+  [WorkItemStatus.Closed]: 'secondary',
 };
 
 export function WorkItemsPage() {
