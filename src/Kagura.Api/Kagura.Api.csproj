@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Kagura.Core\Kagura.Core.csproj" />
     <ProjectReference Include="..\Kagura.Data\Kagura.Data.csproj" />
+    <ProjectReference Include="..\Kagura.ServiceDefaults\Kagura.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

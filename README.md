@@ -8,7 +8,7 @@ Single-user, local-only. No auth. Built for one developer's workstation.
 
 ```
 ┌──────────────────────────┐         ┌──────────────────────────────────┐
-│  React + xterm.js (5173) │ <─SR──> │  ASP.NET Core API (5050)         │
+│  React + xterm.js (5173) │ <─SR──> │  ASP.NET Core API (5253)         │
 │  Sources / WorkItems UI  │ <─REST─>│  + SignalR /hubs/agent           │
 └──────────────────────────┘         │  + EF Core (SQLite)              │
                                      │  + claude CLI (triage)            │
@@ -37,18 +37,19 @@ Per work item: a branch `devflow/<external-id>-<slug>` is cut from the repo's de
 ## First run
 
 ```bash
-# 1. Backend (triage will shell out to the `claude` CLI on $PATH —
-#    make sure `claude` is logged in: run `claude` once interactively if not.)
-dotnet run --project src/Kagura.Api
-# → http://localhost:5050
+# One command — the Aspire AppHost orchestrates the API + Vite frontend
+# together, injects the API URL into the frontend, and opens a dashboard
+# with logs, traces, and health for both processes.
+dotnet run --project src/Kagura.AppHost   # or: ./dev.sh
+# → Aspire dashboard prints its own URL on startup
+# → API at http://localhost:5253
+# → Web at http://localhost:5173
 # → DB + DataProtection keys auto-created under ~/.devflow/
-
-# 2. Frontend (new terminal)
-cd web/kagura-web
-npm install
-npm run dev
-# → http://localhost:5173
 ```
+
+Make sure the `claude` CLI on `$PATH` is logged in (run `claude` once interactively if not) — triage shells out to it.
+
+To run pieces individually without Aspire: `dotnet watch --project src/Kagura.Api` and, in another terminal, `npm --prefix web/kagura-web run dev`.
 
 In the UI:
 
