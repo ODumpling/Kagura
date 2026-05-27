@@ -11,7 +11,7 @@ Single-user, local-only. No auth. Built for one developer's workstation.
 │  React + xterm.js (5173) │ <─SR──> │  ASP.NET Core API (5050)         │
 │  Sources / WorkItems UI  │ <─REST─>│  + SignalR /hubs/agent           │
 └──────────────────────────┘         │  + EF Core (SQLite)              │
-                                     │  + Anthropic SDK (triage)        │
+                                     │  + claude CLI (triage)            │
                                      │  + Porta.Pty (claude PTYs)       │
                                      │  + git CLI (worktrees, PRs)      │
                                      └──────────────────────────────────┘
@@ -32,21 +32,18 @@ Per work item: a branch `devflow/<external-id>-<slug>` is cut from the repo's de
 - **`claude` CLI** on `$PATH`, already logged in — Kagura spawns this binary as the user
 - **`git`** on `$PATH`
 - **`gh`** on `$PATH` (only for opening PRs; not required for local use)
-- **Anthropic API key** for triage only — the agent work itself uses your existing `claude` CLI session
+- Triage uses the same logged-in `claude` CLI (headless `claude -p`), so no Anthropic API key is required
 
 ## First run
 
 ```bash
-# 1. Set your triage API key
-#    edit src/Kagura.Api/appsettings.json → Anthropic.ApiKey
-#    (or set env var: ASPNETCORE_Anthropic__ApiKey)
-
-# 2. Backend
+# 1. Backend (triage will shell out to the `claude` CLI on $PATH —
+#    make sure `claude` is logged in: run `claude` once interactively if not.)
 dotnet run --project src/Kagura.Api
 # → http://localhost:5050
 # → DB + DataProtection keys auto-created under ~/.devflow/
 
-# 3. Frontend (new terminal)
+# 2. Frontend (new terminal)
 cd web/kagura-web
 npm install
 npm run dev
@@ -89,9 +86,8 @@ If `id` is missing, the filename (without `.md`) is used.
     "ClaudeBinary": "claude",             // anything resolvable on $PATH
     "TranscriptsRoot": "~/.devflow/transcripts"
   },
-  "Anthropic": {
-    "ApiKey": "sk-ant-…",
-    "Model": "claude-sonnet-4-6"          // optional; default is Claude46Sonnet
+  "Triage": {
+    "Model": null                         // optional; passes --model to `claude -p` when set
   }
 }
 ```
@@ -106,7 +102,7 @@ Kagura.sln
 │  ├─ Kagura.Core/                  Domain + services (no ASP.NET deps)
 │  │  ├─ Domain/                    Source, WorkItem, AgentTask, AgentRun + enums + SourceConfig records
 │  │  ├─ Sources/                   IIssueProvider, IssueProviderFactory, MarkdownIssueProvider, stubs
-│  │  ├─ Triage/                    ITriageService, AnthropicTriageService (prompt-cached system msg)
+│  │  ├─ Triage/                    ITriageService, ClaudeCliTriageService (shells out to `claude -p`)
 │  │  ├─ Git/                       GitService (worktrees, branches, PR), ProcessRunner
 │  │  └─ Agents/                    AgentRunner, AgentSession (PTY wrapper), IAgentBroadcaster
 │  ├─ Kagura.Data/                  EF Core
@@ -198,7 +194,7 @@ The four stubs to fill in are `GitHubIssueProvider`, `AzureDevOpsIssueProvider`,
 
 ### Adding a triage backend
 
-`ITriageService` is the seam. Default impl is `AnthropicTriageService` (uses `Anthropic.SDK` with an ephemeral cache marker on the system prompt). Swap it in `Program.cs` to plug in OpenAI, a local model, or a deterministic rules engine.
+`ITriageService` is the seam. Default impl is `ClaudeCliTriageService`, which shells out to `claude -p --output-format json --append-system-prompt …` against the user's logged-in CLI session. Swap it in `Program.cs` to plug in OpenAI, a direct Anthropic SDK call, a local model, or a deterministic rules engine.
 
 ### Editing the merge/PR flow
 

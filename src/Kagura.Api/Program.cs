@@ -30,10 +30,10 @@ builder.Services.AddScoped<SourceSyncService>();
 
 builder.Services.Configure<TriageOptions>(opt =>
 {
-    opt.ApiKey = builder.Configuration["Anthropic:ApiKey"] ?? "";
-    opt.Model = builder.Configuration["Anthropic:Model"] ?? Anthropic.SDK.Constants.AnthropicModels.Claude46Sonnet;
+    opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+    opt.Model = builder.Configuration["Triage:Model"];
 });
-builder.Services.AddScoped<ITriageService, AnthropicTriageService>();
+builder.Services.AddScoped<ITriageService, ClaudeCliTriageService>();
 
 builder.Services.AddSingleton(sp =>
     new GitService(devflow["WorktreesRoot"] ?? "~/.devflow/worktrees",
