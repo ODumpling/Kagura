@@ -190,7 +190,7 @@ public partial class GitService
             return null;
         }
 
-        var body = $"Issue: {wi.ExternalId}\n\n{wi.Body}";
+        var body = $"Issue: {wi.ExternalId}\n\n{wi.Body}\n\n closes #{wi.ExternalId}";
         var pr = await ProcessRunner.RunAsync("gh",
             new[] { "pr", "create", "--head", branch, "--title", wi.Title, "--body", body }, repoPath, ct);
         if (pr.Success) return pr.Stdout.Trim();
