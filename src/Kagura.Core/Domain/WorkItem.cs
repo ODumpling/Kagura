@@ -9,6 +9,7 @@ public enum WorkItemStatus
     PullRequested = 4,
     Done = 5,
     Cancelled = 6,
+    Closed = 7,
 }
 
 public class WorkItem
@@ -30,6 +31,16 @@ public class WorkItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? TriagedAt { get; set; }
+    public DateTime? ClosedAt { get; set; }
 
     public List<AgentTask> Tasks { get; set; } = new();
+
+    public void MarkClosed()
+    {
+        if (Status == WorkItemStatus.Closed && ClosedAt is not null) return;
+        Status = WorkItemStatus.Closed;
+        var now = DateTime.UtcNow;
+        ClosedAt ??= now;
+        UpdatedAt = now;
+    }
 }
