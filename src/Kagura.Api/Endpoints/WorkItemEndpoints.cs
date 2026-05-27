@@ -20,7 +20,9 @@ public record WorkItemListDto(
     string? PullRequestUrl,
     DateTime UpdatedAt,
     DateTime? TriagedAt,
-    int TaskCount);
+    int TaskCount,
+    bool RalphLoopActive,
+    string? RalphLoopHaltReason);
 
 public record WorkItemDetailDto(
     Guid Id,
@@ -36,6 +38,8 @@ public record WorkItemDetailDto(
     string? PullRequestUrl,
     DateTime UpdatedAt,
     DateTime? TriagedAt,
+    bool RalphLoopActive,
+    string? RalphLoopHaltReason,
     IReadOnlyList<AgentTaskDto> Tasks);
 
 public record AgentTaskDto(
@@ -47,7 +51,9 @@ public record AgentTaskDto(
     string? BranchName,
     string? WorktreePath,
     bool IncludeInPullRequest,
-    string? ReviewNotes = null);
+    string? ReviewNotes = null,
+    int RetryAttempts = 0,
+    string? LastFailureReason = null);
 
 public record UpdateIncludeInPullRequestDto(bool IncludeInPullRequest);
 
@@ -96,7 +102,7 @@ public static class WorkItemEndpoints
             return Results.Ok(rows.Select(w => new WorkItemListDto(
                 w.Id, w.SourceId, w.Source.Name, w.ExternalId, w.Title,
                 w.Status, w.Url, w.Labels, w.BranchName, w.PullRequestUrl,
-                w.UpdatedAt, w.TriagedAt, w.Tasks.Count)));
+                w.UpdatedAt, w.TriagedAt, w.Tasks.Count, w.RalphLoopActive, w.RalphLoopHaltReason)));
         });
 
         grp.MapGet("/{id:guid}", async (Guid id, KaguraDbContext db) =>
@@ -110,8 +116,8 @@ public static class WorkItemEndpoints
             return Results.Ok(new WorkItemDetailDto(
                 w.Id, w.SourceId, w.Source.Name, w.ExternalId, w.Title, w.Body,
                 w.Status, w.Url, w.Labels, w.BranchName, w.PullRequestUrl,
-                w.UpdatedAt, w.TriagedAt,
-                w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest, t.ReviewNotes)).ToList()));
+                w.UpdatedAt, w.TriagedAt, w.RalphLoopActive, w.RalphLoopHaltReason,
+                w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest, t.ReviewNotes, t.RetryAttempts, t.LastFailureReason)).ToList()));
         });
 
         grp.MapGet("/{id:guid}/pr-preview", async (
@@ -387,6 +393,71 @@ public static class WorkItemEndpoints
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
 
             return Results.Ok(new AutoReviewResultDto(queue.Count, autoMergedCount, flaggedCount, items));
+        });
+
+        // Start (or re-start after halt) the Ralph Loop on this work item.
+        // Resets any Failed tasks to Approved with fresh retry budget, then flips the flag.
+        grp.MapPost("/{id:guid}/ralph-loop", async (
+            Guid id,
+            KaguraDbContext db,
+            IAgentBroadcaster broadcaster,
+            CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems
+                .Include(w => w.Tasks)
+                .FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (wi is null) return Results.NotFound();
+
+            if (wi.Status is WorkItemStatus.Closed or WorkItemStatus.PullRequested)
+                return Results.BadRequest(new { error = $"Work item is {wi.Status}; nothing for Ralph to do." });
+
+            if (wi.Tasks.Count == 0)
+                return Results.BadRequest(new { error = "No tasks on this work item." });
+
+            if (wi.Tasks.Count > 3)
+                return Results.BadRequest(new { error = $"Ralph Loop supports up to 3 tasks per work item; this one has {wi.Tasks.Count}." });
+
+            if (wi.Tasks.All(t => t.Status == AgentTaskStatus.Merged))
+                return Results.BadRequest(new { error = "All tasks already merged." });
+
+            var now = DateTime.UtcNow;
+            foreach (var t in wi.Tasks.Where(t => t.Status == AgentTaskStatus.Failed))
+            {
+                t.Status = AgentTaskStatus.Approved;
+                t.RetryAttempts = 0;
+                t.LastFailureReason = null;
+                t.UpdatedAt = now;
+            }
+
+            wi.RalphLoopActive = true;
+            wi.RalphLoopHaltReason = null;
+            wi.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
+
+            return Results.Accepted();
+        });
+
+        // Cancel the loop. Does not kill in-flight agents — they finish their current attempt;
+        // the loop just stops advancing further stages.
+        grp.MapPost("/{id:guid}/ralph-loop/cancel", async (
+            Guid id,
+            KaguraDbContext db,
+            IAgentBroadcaster broadcaster,
+            CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems.FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (wi is null) return Results.NotFound();
+
+            if (!wi.RalphLoopActive) return Results.NoContent();
+
+            wi.RalphLoopActive = false;
+            wi.RalphLoopHaltReason = "Cancelled by user.";
+            wi.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
+
+            return Results.NoContent();
         });
 
         return app;

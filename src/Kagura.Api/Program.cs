@@ -68,9 +68,11 @@ builder.Services.AddSingleton(new AgentRunnerOptions
     TranscriptsRoot = devflow["TranscriptsRoot"] ?? "~/.devflow/transcripts",
     ApiBaseUrl = devflow["ApiBaseUrl"] ?? "http://localhost:5253",
     PromptTemplate = devflow["PromptTemplate"] ?? AgentRunnerOptions.DefaultPromptTemplate,
+    MaxRunDuration = devflow.GetValue<TimeSpan?>("MaxRunDuration") ?? TimeSpan.FromMinutes(30),
 });
 builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
 builder.Services.AddSingleton<IAgentRunner, AgentRunner>();
+builder.Services.AddScoped<IAgentRunSink, AgentRunSink>();
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new WorkItemCleanupOptions
@@ -79,6 +81,15 @@ builder.Services.AddSingleton(new WorkItemCleanupOptions
     Retention = devflow.GetValue<TimeSpan?>("WorkItemCleanup:Retention") ?? TimeSpan.FromDays(7),
 });
 builder.Services.AddHostedService<WorkItemCleanupService>();
+
+builder.Services.AddSingleton(new RalphLoopOptions
+{
+    TickInterval = devflow.GetValue<TimeSpan?>("RalphLoop:TickInterval") ?? TimeSpan.FromSeconds(5),
+    MaxRetryAttempts = devflow.GetValue<int?>("RalphLoop:MaxRetryAttempts") ?? 3,
+    MaxConcurrentTasksPerWorkItem = devflow.GetValue<int?>("RalphLoop:MaxConcurrentTasksPerWorkItem") ?? 3,
+});
+builder.Services.AddScoped<RalphLoopDriver>();
+builder.Services.AddHostedService<RalphLoopService>();
 
 builder.Services.AddOpenApi();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p

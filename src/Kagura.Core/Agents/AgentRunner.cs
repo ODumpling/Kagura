@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Kagura.Core.Domain;
 using Kagura.Core.Git;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Porta.Pty;
 
@@ -14,6 +15,9 @@ public class AgentRunnerOptions
     public string ApiBaseUrl { get; set; } = "http://localhost:5253";
     public string PromptTemplate { get; set; } = DefaultPromptTemplate;
 
+    // Hard cap on a single agent run before the Ralph loop kills it and counts it as a failure.
+    public TimeSpan MaxRunDuration { get; set; } = TimeSpan.FromMinutes(30);
+
     public const string DefaultPromptTemplate = """
         # THE TASK
 
@@ -23,7 +27,7 @@ public class AgentRunnerOptions
         Branch: {{BRANCH}}
 
         Do not pick up adjacent work, related cleanup, or anything else you notice while exploring. If it's not required to finish this single task, leave it alone.
-
+        {{PRIOR_ATTEMPTS}}
         # PARENT CONTEXT (read-only)
 
         Pull the parent work item using `{{VIEW_TASK_COMMAND}}` for context only. If it references a parent PRD, skim that too. Use this to understand scope — not to expand it.
@@ -89,6 +93,7 @@ public interface IAgentRunner
     IReadOnlyCollection<AgentSession> Active { get; }
     Task<AgentSession> StartAsync(WorkItem wi, AgentTask task, string repoPath, CancellationToken ct = default);
     Task StopAsync(Guid runId);
+    void MarkExitReason(Guid runId, AgentExitReason reason);
 }
 
 public class AgentRunner : IAgentRunner
@@ -96,16 +101,24 @@ public class AgentRunner : IAgentRunner
     private readonly GitService _git;
     private readonly AgentRunnerOptions _opts;
     private readonly IAgentBroadcaster _broadcaster;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly SemaphoreSlim _slots;
     private readonly ConcurrentDictionary<Guid, AgentSession> _sessions = new();
+    private readonly ConcurrentDictionary<Guid, AgentExitReason> _exitOverrides = new();
     private readonly ILogger<AgentRunner> _log;
     private readonly ILoggerFactory _loggerFactory;
 
-    public AgentRunner(GitService git, AgentRunnerOptions opts, IAgentBroadcaster broadcaster, ILoggerFactory loggerFactory)
+    public AgentRunner(
+        GitService git,
+        AgentRunnerOptions opts,
+        IAgentBroadcaster broadcaster,
+        IServiceScopeFactory scopeFactory,
+        ILoggerFactory loggerFactory)
     {
         _git = git;
         _opts = opts;
         _broadcaster = broadcaster;
+        _scopeFactory = scopeFactory;
         _slots = new SemaphoreSlim(opts.MaxConcurrentAgents, opts.MaxConcurrentAgents);
         _loggerFactory = loggerFactory;
         _log = loggerFactory.CreateLogger<AgentRunner>();
@@ -154,6 +167,7 @@ public class AgentRunner : IAgentRunner
             session.OnExit += code =>
             {
                 _ = _broadcaster.ExitAsync(runId, code);
+                _ = RecordExitAsync(runId, code);
                 Cleanup(runId);
             };
 
@@ -170,8 +184,29 @@ public class AgentRunner : IAgentRunner
     public async Task StopAsync(Guid runId)
     {
         if (!_sessions.TryRemove(runId, out var session)) return;
+        _exitOverrides.TryAdd(runId, AgentExitReason.KilledByUser);
         await session.DisposeAsync();
         _slots.Release();
+    }
+
+    public void MarkExitReason(Guid runId, AgentExitReason reason)
+    {
+        _exitOverrides[runId] = reason;
+    }
+
+    private async Task RecordExitAsync(Guid runId, int? exitCode)
+    {
+        AgentExitReason? overrideReason = _exitOverrides.TryRemove(runId, out var r) ? r : null;
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var sink = scope.ServiceProvider.GetRequiredService<IAgentRunSink>();
+            await sink.RecordExitAsync(runId, exitCode, overrideReason, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to record agent run exit for {RunId}", runId);
+        }
     }
 
     private void Cleanup(Guid runId)
@@ -200,7 +235,30 @@ public class AgentRunner : IAgentRunner
             .Replace("{{ISSUE_TITLE}}", task.Title)
             .Replace("{{VIEW_TASK_COMMAND}}", ViewTaskCommand(wi))
             .Replace("{{BRANCH}}", branch)
-            .Replace("{{COMPLETE_URL}}", $"{_opts.ApiBaseUrl.TrimEnd('/')}/api/agents/complete/{task.Id}");
+            .Replace("{{COMPLETE_URL}}", $"{_opts.ApiBaseUrl.TrimEnd('/')}/api/agents/complete/{task.Id}")
+            .Replace("{{PRIOR_ATTEMPTS}}", BuildPriorAttemptsSection(task));
+
+    private static string BuildPriorAttemptsSection(AgentTask task)
+    {
+        if (task.RetryAttempts <= 0) return string.Empty;
+
+        var reason = string.IsNullOrWhiteSpace(task.LastFailureReason)
+            ? "unknown"
+            : task.LastFailureReason.Trim();
+        var attemptNumber = task.RetryAttempts + 1;
+
+        return $"""
+
+
+            # PRIOR ATTEMPTS
+
+            This is attempt {attemptNumber} of 3. Earlier attempts failed.
+
+            Last failure: {reason}
+
+            The branch has been reset to the work item base. Do not assume any partial work from prior attempts persists. Use the failure note to avoid the same path.
+            """;
+    }
 
     private static string ViewTaskCommand(WorkItem wi) => wi.Source.Type switch
     {

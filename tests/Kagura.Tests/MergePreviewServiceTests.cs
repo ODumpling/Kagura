@@ -1,8 +1,15 @@
 using Kagura.Core.Domain;
 using Kagura.Core.Git;
+using Kagura.Core.Merge;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Kagura.Tests;
+
+internal sealed class StubMergeResolver : IMergeConflictResolver
+{
+    public Task<MergeResolutionResult> ResolveAsync(string worktreePath, string taskTitle, CancellationToken ct = default) =>
+        Task.FromResult(new MergeResolutionResult(false, "stub resolver — not invoked in tests"));
+}
 
 public class MergePreviewServiceTests : IDisposable
 {
@@ -19,7 +26,7 @@ public class MergePreviewServiceTests : IDisposable
         Directory.CreateDirectory(_repo);
         Directory.CreateDirectory(_worktreesRoot);
 
-        _git = new GitService(_worktreesRoot, NullLogger<GitService>.Instance);
+        _git = new GitService(_worktreesRoot, new StubMergeResolver(), NullLogger<GitService>.Instance);
         _svc = new MergePreviewService(_git, NullLogger<MergePreviewService>.Instance);
 
         Run("git", "init", "-b", "main", _repo);
