@@ -42,7 +42,7 @@ public static class TriageEndpoints
             var dtoList = await db.AgentTasks
                 .Where(t => t.WorkItemId == wi.Id)
                 .OrderBy(t => t.Order)
-                .Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath))
+                .Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest))
                 .ToListAsync(ct);
             return Results.Ok(new TriageResultDto(wi.Id, dtoList.Count, dtoList));
         });
@@ -86,7 +86,7 @@ public static class TriageEndpoints
             wi.UpdatedAt = now;
 
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest));
         });
 
         grp.MapPut("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, UpdateTaskDto dto, KaguraDbContext db) =>
@@ -98,7 +98,7 @@ public static class TriageEndpoints
             t.Order = dto.Order;
             t.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
-            return Results.Ok(new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath));
+            return Results.Ok(new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest));
         });
 
         grp.MapPatch("/tasks/{taskId:guid}/status", async (Guid workItemId, Guid taskId, UpdateTaskStatusDto dto, KaguraDbContext db, CancellationToken ct) =>
@@ -126,7 +126,7 @@ public static class TriageEndpoints
             wi.UpdatedAt = now;
 
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest));
         });
 
         grp.MapDelete("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, KaguraDbContext db) =>
