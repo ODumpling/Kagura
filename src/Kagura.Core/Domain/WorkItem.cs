@@ -34,4 +34,13 @@ public class WorkItem
     public DateTime? ClosedAt { get; set; }
 
     public List<AgentTask> Tasks { get; set; } = new();
+
+    public void MarkClosed()
+    {
+        if (Status == WorkItemStatus.Closed && ClosedAt is not null) return;
+        Status = WorkItemStatus.Closed;
+        var now = DateTime.UtcNow;
+        ClosedAt ??= now;
+        UpdatedAt = now;
+    }
 }
