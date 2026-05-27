@@ -76,7 +76,7 @@ export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onSt
               )}
               {colTasks.map(t => {
                 const run = runs[t.id];
-                const canStart = t.status === AgentTaskStatus.Approved || t.status === AgentTaskStatus.AwaitingReview;
+                const canStart = t.status === AgentTaskStatus.Approved;
                 const draggable = t.status !== AgentTaskStatus.Running;
                 return (
                   <div
