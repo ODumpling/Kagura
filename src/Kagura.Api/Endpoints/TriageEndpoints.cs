@@ -26,7 +26,7 @@ public static class TriageEndpoints
             var proposals = await triage.ProposeTasksAsync(wi.Title, wi.Body, wi.Labels, ct);
             foreach (var p in proposals)
             {
-                wi.Tasks.Add(new AgentTask
+                db.AgentTasks.Add(new AgentTask
                 {
                     WorkItemId = wi.Id,
                     Title = p.Title,
@@ -37,9 +37,11 @@ public static class TriageEndpoints
 
             await db.SaveChangesAsync(ct);
 
-            var dtoList = wi.Tasks.OrderBy(t => t.Order)
+            var dtoList = await db.AgentTasks
+                .Where(t => t.WorkItemId == wi.Id)
+                .OrderBy(t => t.Order)
                 .Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath))
-                .ToList();
+                .ToListAsync(ct);
             return Results.Ok(new TriageResultDto(wi.Id, dtoList.Count, dtoList));
         });
 
