@@ -83,11 +83,14 @@ public static class WorkItemEndpoints
     {
         var grp = app.MapGroup("/api/workitems");
 
-        grp.MapGet("", async (KaguraDbContext db, Guid? sourceId, WorkItemStatus? status) =>
+        grp.MapGet("", async (KaguraDbContext db, Guid? sourceId, WorkItemStatus? status, bool? includeClosed) =>
         {
             IQueryable<WorkItem> q = db.WorkItems.Include(w => w.Source).Include(w => w.Tasks);
             if (sourceId.HasValue) q = q.Where(w => w.SourceId == sourceId.Value);
-            if (status.HasValue) q = q.Where(w => w.Status == status.Value);
+            if (status.HasValue)
+                q = q.Where(w => w.Status == status.Value);
+            else if (includeClosed != true)
+                q = q.Where(w => w.Status != WorkItemStatus.Closed);
 
             var rows = await q.OrderByDescending(w => w.UpdatedAt).ToListAsync();
             return Results.Ok(rows.Select(w => new WorkItemListDto(

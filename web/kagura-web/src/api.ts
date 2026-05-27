@@ -33,7 +33,14 @@ export const api = {
   },
 
   workItems: {
-    list: (sourceId?: string) => http<WorkItemSummary[]>('GET', `/api/workitems${sourceId ? `?sourceId=${sourceId}` : ''}`),
+    list: (sourceId?: string, status?: number, includeClosed?: boolean) => {
+      const params = new URLSearchParams();
+      if (sourceId) params.set('sourceId', sourceId);
+      if (status !== undefined) params.set('status', String(status));
+      if (includeClosed) params.set('includeClosed', 'true');
+      const qs = params.toString();
+      return http<WorkItemSummary[]>('GET', `/api/workitems${qs ? `?${qs}` : ''}`);
+    },
     get: (id: string) => http<WorkItemDetail>('GET', `/api/workitems/${id}`),
     triage: (id: string) => http<{ workItemId: string; taskCount: number; tasks: AgentTaskDto[] }>('POST', `/api/workitems/${id}/triage`),
     approve: (id: string) => http<unknown>('POST', `/api/workitems/${id}/triage/approve`),

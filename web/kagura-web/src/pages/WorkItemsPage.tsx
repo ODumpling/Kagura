@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const statusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline' | 'destructive'> = {
   [WorkItemStatus.New]: 'outline',
@@ -25,6 +26,9 @@ export function WorkItemsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const sourceId = searchParams.get('sourceId') ?? undefined;
+  const statusParam = searchParams.get('status') ?? 'active';
+  const status = /^\d+$/.test(statusParam) ? (Number(statusParam) as WorkItemStatus) : undefined;
+  const includeClosed = statusParam === 'all';
   const { sources } = useSources();
 
   const activeSource = useMemo(
@@ -33,11 +37,17 @@ export function WorkItemsPage() {
   );
 
   useEffect(() => {
-    api.workItems.list(sourceId).then(setItems).catch(e => setError(e.message));
-  }, [sourceId]);
+    api.workItems.list(sourceId, status, includeClosed).then(setItems).catch(e => setError(e.message));
+  }, [sourceId, status, includeClosed]);
 
-  function clearFilter() {
+  function clearSourceFilter() {
     searchParams.delete('sourceId');
+    setSearchParams(searchParams, { replace: true });
+  }
+
+  function onStatusChange(value: string) {
+    if (value === 'active') searchParams.delete('status');
+    else searchParams.set('status', value);
     setSearchParams(searchParams, { replace: true });
   }
 
@@ -54,11 +64,26 @@ export function WorkItemsPage() {
               {activeSource && <span> in this source</span>}
             </p>
             {activeSource && (
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearFilter}>
-                <X /> Clear filter
+              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearSourceFilter}>
+                <X /> Clear source
               </Button>
             )}
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Status</span>
+          <Select value={statusParam} onValueChange={onStatusChange}>
+            <SelectTrigger className="w-[180px] h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active (hide closed)</SelectItem>
+              <SelectItem value="all">All statuses</SelectItem>
+              {Object.entries(WorkItemStatusLabel).map(([k, v]) => (
+                <SelectItem key={k} value={k}>{v}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
