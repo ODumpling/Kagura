@@ -22,7 +22,7 @@ export default function App() {
               <Separator orientation="vertical" className="mr-2 h-4" />
               <span className="text-sm text-muted-foreground">devflow orchestrator</span>
             </header>
-            <main className="p-6 max-w-[1400px] w-full">
+            <main className="flex flex-1 flex-col p-6 max-w-[1400px] w-full min-h-0">
               <Routes>
                 <Route path="/" element={<Navigate to="/workitems" replace />} />
                 <Route path="/sources" element={<SourcesPage />} />

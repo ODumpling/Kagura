@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Sparkles, CheckCheck, Loader2 } from 'lucide-react';
+import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink } from 'lucide-react';
 import { api } from '@/api';
 import { type AgentRunDto, AgentTaskStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
 import { AgentTerminal } from '@/components/AgentTerminal';
+import { Markdown } from '@/components/Markdown';
 import { TaskKanban } from '@/components/TaskKanban';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const wiStatusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline'> = {
   [WorkItemStatus.New]: 'outline',
@@ -85,6 +87,19 @@ export function WorkItemDetailPage() {
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
+  async function finishWorkItem() {
+    if (!item) return;
+    setBusy('finish'); setError(null);
+    try {
+      const result = await api.workItems.finish(item.id);
+      await reload();
+      if (result.pullRequestError) {
+        setError(`Merged ${result.merged} task(s) but PR step failed: ${result.pullRequestError}`);
+      }
+    }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
   async function moveTask(taskId: string, status: AgentTaskStatus) {
     setItem(prev => prev ? { ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, status } : t) } : prev);
     setError(null);
@@ -93,9 +108,13 @@ export function WorkItemDetailPage() {
   }
 
   const hasProposed = item.tasks.some(t => t.status === AgentTaskStatus.Proposed);
+  const hasRunning = item.tasks.some(t => t.status === AgentTaskStatus.Running);
+  const reviewable = item.tasks.filter(t => t.status === AgentTaskStatus.AwaitingReview).length;
+  const mergedCount = item.tasks.filter(t => t.status === AgentTaskStatus.Merged).length;
+  const canFinish = !hasRunning && (reviewable > 0 || mergedCount > 0) && item.status !== WorkItemStatus.PullRequested;
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-1 flex-col gap-6 min-h-0">
       <div className="flex justify-between items-start">
         <div>
           <div className="text-sm text-muted-foreground">
@@ -119,6 +138,23 @@ export function WorkItemDetailPage() {
               {busy === 'approve' ? 'Approving…' : 'Approve all'}
             </Button>
           )}
+          {canFinish && (
+            <Button onClick={finishWorkItem} disabled={busy !== null}>
+              {busy === 'finish' ? <Loader2 className="animate-spin" /> : <GitPullRequest />}
+              {busy === 'finish'
+                ? 'Finishing…'
+                : reviewable > 0
+                  ? `Finish (merge ${reviewable} + PR)`
+                  : 'Open PR'}
+            </Button>
+          )}
+          {item.pullRequestUrl && (
+            <Button variant="outline" asChild>
+              <a href={item.pullRequestUrl} target="_blank" rel="noreferrer">
+                <ExternalLink /> View PR
+              </a>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -135,39 +171,56 @@ export function WorkItemDetailPage() {
         </div>
       )}
 
-      <Card>
-        <CardHeader><CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Body</CardTitle></CardHeader>
-        <CardContent>
-          <ScrollArea className="h-48 rounded-md border bg-muted/30 p-3">
-            <pre className="text-xs font-mono whitespace-pre-wrap">{item.body || '(empty)'}</pre>
-          </ScrollArea>
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="board" className="flex flex-1 flex-col min-h-0">
+        <TabsList className="shrink-0">
+          <TabsTrigger value="body">Body</TabsTrigger>
+          <TabsTrigger value="board">
+            Board
+            {item.tasks.length > 0 && (
+              <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px]">{item.tasks.length}</Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Board</CardTitle>
-          {item.tasks.length > 0 && (
-            <span className="text-xs text-muted-foreground">Drag cards between columns to update status</span>
-          )}
-        </CardHeader>
-        <CardContent>
-          {item.tasks.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No tasks yet. Run triage to propose them.</div>
-          ) : (
-            <TaskKanban
-              tasks={item.tasks}
-              runs={runs}
-              busy={busy}
-              onMove={moveTask}
-              onApprove={approveTask}
-              onStart={startTask}
-              onStop={stopRun}
-              onOpenTerminal={setActiveTab}
-            />
-          )}
-        </CardContent>
-      </Card>
+        <TabsContent value="body" className="flex flex-1 flex-col min-h-0">
+          <Card className="flex flex-1 flex-col min-h-0">
+            <CardContent className="flex-1 min-h-0 pt-6">
+              <ScrollArea className="h-full rounded-md border bg-muted/30 p-4">
+                {item.body
+                  ? <Markdown>{item.body}</Markdown>
+                  : <p className="text-xs text-muted-foreground italic">(empty)</p>}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="board">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Board</CardTitle>
+              {item.tasks.length > 0 && (
+                <span className="text-xs text-muted-foreground">Drag cards between columns to update status</span>
+              )}
+            </CardHeader>
+            <CardContent>
+              {item.tasks.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No tasks yet. Run triage to propose them.</div>
+              ) : (
+                <TaskKanban
+                  tasks={item.tasks}
+                  runs={runs}
+                  busy={busy}
+                  onMove={moveTask}
+                  onApprove={approveTask}
+                  onStart={startTask}
+                  onStop={stopRun}
+                  onOpenTerminal={setActiveTab}
+                />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {Object.keys(runs).length > 0 && (
         <>
