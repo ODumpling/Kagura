@@ -114,12 +114,14 @@ public static class WorkItemEndpoints
             if (task.Status != AgentTaskStatus.AwaitingReview)
                 return Results.BadRequest(new { error = $"Task is {task.Status}; only AwaitingReview tasks can be merged." });
 
-            await git.MergeTaskBranchAsync(wi.Source.LocalRepoPath, wi, task, ct);
+            var result = await git.MergeTaskBranchAsync(wi.Source.LocalRepoPath, wi, task, ct);
             if (!string.IsNullOrEmpty(task.WorktreePath))
                 await git.RemoveWorktreeAsync(wi.Source.LocalRepoPath, task.WorktreePath, ct);
 
             var now = DateTime.UtcNow;
             task.Status = AgentTaskStatus.Merged;
+            if (result.Outcome == MergeOutcome.MergedByAgent)
+                task.ReviewNotes = $"Conflicts resolved by AI: {result.Notes}";
             task.UpdatedAt = now;
             wi.BranchName ??= git.WorkItemBranchName(wi);
             wi.UpdatedAt = now;
@@ -156,10 +158,12 @@ public static class WorkItemEndpoints
             {
                 try
                 {
-                    await git.MergeTaskBranchAsync(repoPath, wi, task, ct);
+                    var mergeResult = await git.MergeTaskBranchAsync(repoPath, wi, task, ct);
                     if (!string.IsNullOrEmpty(task.WorktreePath))
                         await git.RemoveWorktreeAsync(repoPath, task.WorktreePath, ct);
                     task.Status = AgentTaskStatus.Merged;
+                    if (mergeResult.Outcome == MergeOutcome.MergedByAgent)
+                        task.ReviewNotes = $"Conflicts resolved by AI: {mergeResult.Notes}";
                     task.UpdatedAt = now;
                     merged++;
                 }
@@ -202,6 +206,8 @@ public static class WorkItemEndpoints
                 log.LogError(ex, "OpenPullRequestAsync threw for work item {WorkItemId}", wi.Id);
                 prError = ex.Message;
             }
+
+            await git.RemoveWorkItemMergeWorktreeAsync(repoPath, wi, ct);
 
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
             return Results.Ok(new FinishWorkItemResultDto(
@@ -269,11 +275,13 @@ public static class WorkItemEndpoints
 
                 try
                 {
-                    await git.MergeTaskBranchAsync(repoPath, wi, task, ct);
+                    var mergeResult = await git.MergeTaskBranchAsync(repoPath, wi, task, ct);
                     if (!string.IsNullOrEmpty(task.WorktreePath))
                         await git.RemoveWorktreeAsync(repoPath, task.WorktreePath, ct);
                     task.Status = AgentTaskStatus.Merged;
-                    task.ReviewNotes = reasoning;
+                    task.ReviewNotes = mergeResult.Outcome == MergeOutcome.MergedByAgent
+                        ? $"{reasoning}\n\nConflicts resolved by AI: {mergeResult.Notes}"
+                        : reasoning;
                     task.UpdatedAt = now;
                     wi.BranchName ??= git.WorkItemBranchName(wi);
                     autoMergedCount++;

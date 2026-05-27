@@ -2,6 +2,7 @@ using Kagura.Api.Endpoints;
 using Kagura.Api.Hubs;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
+using Kagura.Core.Merge;
 using Kagura.Core.Review;
 using Kagura.Core.Sources;
 using Kagura.Core.Triage;
@@ -46,8 +47,16 @@ builder.Services.Configure<ReviewOptions>(opt =>
 });
 builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
 
+builder.Services.Configure<MergeResolverOptions>(opt =>
+{
+    opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+    opt.Model = builder.Configuration["MergeResolver:Model"];
+});
+builder.Services.AddSingleton<IMergeConflictResolver, ClaudeCliMergeResolver>();
+
 builder.Services.AddSingleton(sp =>
     new GitService(devflow["WorktreesRoot"] ?? "~/.devflow/worktrees",
+        sp.GetRequiredService<IMergeConflictResolver>(),
         sp.GetRequiredService<ILogger<GitService>>()));
 builder.Services.AddSingleton(new AgentRunnerOptions
 {
