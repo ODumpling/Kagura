@@ -45,6 +45,8 @@ export const api = {
       http<AgentTaskDto>('PATCH', `/api/workitems/${workItemId}/tasks/${taskId}/status`, { status }),
     deleteTask: (workItemId: string, taskId: string) =>
       http<void>('DELETE', `/api/workitems/${workItemId}/tasks/${taskId}`),
+    mergeTask: (workItemId: string, taskId: string) =>
+      http<AgentTaskDto>('POST', `/api/workitems/${workItemId}/tasks/${taskId}/merge`),
     finish: (id: string) =>
       http<FinishWorkItemResult>('POST', `/api/workitems/${id}/finish`),
   },

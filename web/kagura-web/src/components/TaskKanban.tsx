@@ -31,9 +31,10 @@ interface Props {
   onStart: (taskId: string) => void;
   onStop: (taskId: string) => void;
   onOpenTerminal: (taskId: string) => void;
+  onOpenTask: (taskId: string) => void;
 }
 
-export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onStop, onOpenTerminal }: Props) {
+export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onStop, onOpenTerminal, onOpenTask }: Props) {
   const [dragOver, setDragOver] = useState<AgentTaskStatus | null>(null);
 
   const visibleColumns = COLUMNS.filter(c => c.alwaysShow || tasks.some(t => t.status === c.status));
@@ -81,11 +82,15 @@ export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onSt
                     key={t.id}
                     draggable={draggable}
                     onDragStart={(e) => e.dataTransfer.setData('text/plain', t.id)}
-                    className={`rounded-md border bg-background p-2 shadow-sm ${draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed'}`}
+                    onClick={() => onOpenTask(t.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenTask(t.id); } }}
+                    className={`rounded-md border bg-background p-2 shadow-sm hover:border-foreground/30 hover:bg-muted/40 transition-colors ${draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
                   >
                     <div className="text-sm font-medium">{t.order}. {t.title}</div>
                     {t.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-3">{t.description}</p>}
-                    <div className="flex gap-1 mt-2 flex-wrap">
+                    <div className="flex gap-1 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
                       {t.status === AgentTaskStatus.Proposed && (
                         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onApprove(t.id)} disabled={busy !== null}>
                           {busy === t.id ? <Loader2 className="animate-spin" /> : <Check />}

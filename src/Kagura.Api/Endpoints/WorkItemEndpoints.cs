@@ -88,6 +88,39 @@ public static class WorkItemEndpoints
                 w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath)).ToList()));
         });
 
+        grp.MapPost("/{workItemId:guid}/tasks/{taskId:guid}/merge", async (
+            Guid workItemId,
+            Guid taskId,
+            KaguraDbContext db,
+            GitService git,
+            CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems
+                .Include(w => w.Source)
+                .Include(w => w.Tasks)
+                .FirstOrDefaultAsync(w => w.Id == workItemId, ct);
+            if (wi is null) return Results.NotFound();
+
+            var task = wi.Tasks.FirstOrDefault(t => t.Id == taskId);
+            if (task is null) return Results.NotFound();
+
+            if (task.Status != AgentTaskStatus.AwaitingReview)
+                return Results.BadRequest(new { error = $"Task is {task.Status}; only AwaitingReview tasks can be merged." });
+
+            await git.MergeTaskBranchAsync(wi.Source.LocalRepoPath, wi, task, ct);
+            if (!string.IsNullOrEmpty(task.WorktreePath))
+                await git.RemoveWorktreeAsync(wi.Source.LocalRepoPath, task.WorktreePath, ct);
+
+            var now = DateTime.UtcNow;
+            task.Status = AgentTaskStatus.Merged;
+            task.UpdatedAt = now;
+            wi.BranchName ??= git.WorkItemBranchName(wi);
+            wi.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
+        });
+
         grp.MapPost("/{id:guid}/finish", async (
             Guid id,
             KaguraDbContext db,

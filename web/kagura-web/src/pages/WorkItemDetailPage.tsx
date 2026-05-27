@@ -6,6 +6,7 @@ import { type AgentRunDto, AgentTaskStatus, type WorkItemDetail, WorkItemStatus,
 import { AgentTerminal } from '@/components/AgentTerminal';
 import { Markdown } from '@/components/Markdown';
 import { TaskKanban } from '@/components/TaskKanban';
+import { TaskReviewDialog } from '@/components/TaskReviewDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +31,7 @@ export function WorkItemDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, AgentRunDto>>({});
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!id) return;
@@ -66,7 +68,13 @@ export function WorkItemDetailPage() {
   }
   async function approveTask(taskId: string) {
     setBusy(taskId); setError(null);
-    try { await api.workItems.approveTask(item!.id, taskId); await reload(); }
+    try { await api.workItems.approveTask(item!.id, taskId); await reload(); setReviewTaskId(null); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+  async function rejectTask(taskId: string) {
+    setBusy(taskId); setError(null);
+    try { await api.workItems.updateTaskStatus(item!.id, taskId, AgentTaskStatus.Cancelled); await reload(); setReviewTaskId(null); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
@@ -84,6 +92,12 @@ export function WorkItemDetailPage() {
     const run = runs[taskId]; if (!run) return;
     setBusy(taskId);
     try { await api.agents.stop(run.runId); setRuns(r => { const c = { ...r }; delete c[taskId]; return c; }); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+  async function mergeTask(taskId: string) {
+    setBusy(taskId); setError(null);
+    try { await api.workItems.mergeTask(item!.id, taskId); await reload(); setReviewTaskId(null); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
@@ -215,12 +229,22 @@ export function WorkItemDetailPage() {
                   onStart={startTask}
                   onStop={stopRun}
                   onOpenTerminal={setActiveTab}
+                  onOpenTask={setReviewTaskId}
                 />
               )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      <TaskReviewDialog
+        task={reviewTaskId ? item.tasks.find(t => t.id === reviewTaskId) ?? null : null}
+        busy={busy}
+        onClose={() => setReviewTaskId(null)}
+        onApprove={approveTask}
+        onReject={rejectTask}
+        onMerge={mergeTask}
+      />
 
       {Object.keys(runs).length > 0 && (
         <>
