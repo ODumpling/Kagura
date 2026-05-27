@@ -60,6 +60,31 @@ public static class TriageEndpoints
             return Results.Ok(new { wi.Id, wi.Status, wi.TriagedAt });
         });
 
+        grp.MapPost("/tasks/{taskId:guid}/approve", async (Guid workItemId, Guid taskId, KaguraDbContext db, CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems.Include(w => w.Tasks).FirstOrDefaultAsync(w => w.Id == workItemId, ct);
+            if (wi is null) return Results.NotFound();
+
+            var task = wi.Tasks.FirstOrDefault(t => t.Id == taskId);
+            if (task is null) return Results.NotFound();
+            if (task.Status != AgentTaskStatus.Proposed)
+                return Results.BadRequest(new { error = $"Task is {task.Status}, only Proposed tasks can be approved." });
+
+            var now = DateTime.UtcNow;
+            task.Status = AgentTaskStatus.Approved;
+            task.UpdatedAt = now;
+
+            if (wi.Status == WorkItemStatus.New)
+            {
+                wi.Status = WorkItemStatus.Triaged;
+                wi.TriagedAt = now;
+            }
+            wi.UpdatedAt = now;
+
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
+        });
+
         grp.MapPut("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, UpdateTaskDto dto, KaguraDbContext db) =>
         {
             var t = await db.AgentTasks.FirstOrDefaultAsync(x => x.Id == taskId && x.WorkItemId == workItemId);

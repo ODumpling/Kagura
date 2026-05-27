@@ -36,6 +36,8 @@ export const api = {
     get: (id: string) => http<WorkItemDetail>('GET', `/api/workitems/${id}`),
     triage: (id: string) => http<{ workItemId: string; taskCount: number; tasks: AgentTaskDto[] }>('POST', `/api/workitems/${id}/triage`),
     approve: (id: string) => http<unknown>('POST', `/api/workitems/${id}/triage/approve`),
+    approveTask: (workItemId: string, taskId: string) =>
+      http<AgentTaskDto>('POST', `/api/workitems/${workItemId}/tasks/${taskId}/approve`),
     updateTask: (workItemId: string, taskId: string, body: { title: string; description: string; order: number }) =>
       http<AgentTaskDto>('PUT', `/api/workitems/${workItemId}/tasks/${taskId}`, body),
     deleteTask: (workItemId: string, taskId: string) =>

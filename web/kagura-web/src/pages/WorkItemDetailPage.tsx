@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Play, Square, Terminal as TerminalIcon, Sparkles, CheckCheck } from 'lucide-react';
+import { Play, Square, Terminal as TerminalIcon, Sparkles, CheckCheck, Check, Loader2 } from 'lucide-react';
 import { api } from '@/api';
 import { type AgentRunDto, AgentTaskStatus, AgentTaskStatusLabel, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
 import { AgentTerminal } from '@/components/AgentTerminal';
@@ -71,6 +71,12 @@ export function WorkItemDetailPage() {
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
+  async function approveTask(taskId: string) {
+    setBusy(taskId); setError(null);
+    try { await api.workItems.approveTask(item!.id, taskId); await reload(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
   async function startTask(taskId: string) {
     setBusy(taskId); setError(null);
     try {
@@ -107,11 +113,13 @@ export function WorkItemDetailPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={runTriage} disabled={busy !== null}>
-            <Sparkles /> Triage
+            {busy === 'triage' ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            {busy === 'triage' ? 'Triaging…' : 'Triage'}
           </Button>
           {hasProposed && (
             <Button onClick={approveAll} disabled={busy !== null}>
-              <CheckCheck /> Approve all
+              {busy === 'approve' ? <Loader2 className="animate-spin" /> : <CheckCheck />}
+              {busy === 'approve' ? 'Approving…' : 'Approve all'}
             </Button>
           )}
         </div>
@@ -120,6 +128,13 @@ export function WorkItemDetailPage() {
       {error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
           {error}
+        </div>
+      )}
+
+      {busy === 'triage' && (
+        <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm flex items-center gap-2">
+          <Loader2 className="size-4 animate-spin" />
+          Running triage… asking Claude to break this work item into tasks. This can take a moment.
         </div>
       )}
 
@@ -150,9 +165,16 @@ export function WorkItemDetailPage() {
                   </div>
                   <p className="text-sm text-muted-foreground my-2">{t.description}</p>
                   <div className="flex gap-2">
+                    {t.status === AgentTaskStatus.Proposed && (
+                      <Button size="sm" onClick={() => approveTask(t.id)} disabled={busy !== null}>
+                        {busy === t.id ? <Loader2 className="animate-spin" /> : <Check />}
+                        {busy === t.id ? 'Approving…' : 'Approve'}
+                      </Button>
+                    )}
                     {canStart && !run && (
                       <Button size="sm" onClick={() => startTask(t.id)} disabled={busy === t.id}>
-                        <Play /> Start agent
+                        {busy === t.id ? <Loader2 className="animate-spin" /> : <Play />}
+                        {busy === t.id ? 'Starting…' : 'Start agent'}
                       </Button>
                     )}
                     {run && (
