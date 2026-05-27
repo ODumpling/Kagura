@@ -40,6 +40,8 @@ export const api = {
       http<AgentTaskDto>('POST', `/api/workitems/${workItemId}/tasks/${taskId}/approve`),
     updateTask: (workItemId: string, taskId: string, body: { title: string; description: string; order: number }) =>
       http<AgentTaskDto>('PUT', `/api/workitems/${workItemId}/tasks/${taskId}`, body),
+    updateTaskStatus: (workItemId: string, taskId: string, status: number) =>
+      http<AgentTaskDto>('PATCH', `/api/workitems/${workItemId}/tasks/${taskId}/status`, { status }),
     deleteTask: (workItemId: string, taskId: string) =>
       http<void>('DELETE', `/api/workitems/${workItemId}/tasks/${taskId}`),
   },

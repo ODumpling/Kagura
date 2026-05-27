@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Play, Square, Terminal as TerminalIcon, Sparkles, CheckCheck, Check, Loader2 } from 'lucide-react';
+import { Sparkles, CheckCheck, Loader2 } from 'lucide-react';
 import { api } from '@/api';
-import { type AgentRunDto, AgentTaskStatus, AgentTaskStatusLabel, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
+import { type AgentRunDto, AgentTaskStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
 import { AgentTerminal } from '@/components/AgentTerminal';
+import { TaskKanban } from '@/components/TaskKanban';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -18,16 +19,6 @@ const wiStatusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline
   [WorkItemStatus.PullRequested]: 'default',
   [WorkItemStatus.Done]: 'default',
   [WorkItemStatus.Cancelled]: 'outline',
-};
-
-const taskStatusVariant: Record<AgentTaskStatus, 'secondary' | 'default' | 'outline' | 'destructive'> = {
-  [AgentTaskStatus.Proposed]: 'outline',
-  [AgentTaskStatus.Approved]: 'secondary',
-  [AgentTaskStatus.Running]: 'default',
-  [AgentTaskStatus.AwaitingReview]: 'secondary',
-  [AgentTaskStatus.Merged]: 'default',
-  [AgentTaskStatus.Failed]: 'destructive',
-  [AgentTaskStatus.Cancelled]: 'outline',
 };
 
 export function WorkItemDetailPage() {
@@ -94,6 +85,12 @@ export function WorkItemDetailPage() {
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
+  async function moveTask(taskId: string, status: AgentTaskStatus) {
+    setItem(prev => prev ? { ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, status } : t) } : prev);
+    setError(null);
+    try { await api.workItems.updateTaskStatus(item!.id, taskId, status); await reload(); }
+    catch (e: any) { setError(e.message); await reload(); }
+  }
 
   const hasProposed = item.tasks.some(t => t.status === AgentTaskStatus.Proposed);
 
@@ -138,63 +135,39 @@ export function WorkItemDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Body</CardTitle></CardHeader>
-          <CardContent>
-            <ScrollArea className="h-72 rounded-md border bg-muted/30 p-3">
-              <pre className="text-xs font-mono whitespace-pre-wrap">{item.body || '(empty)'}</pre>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+      <Card>
+        <CardHeader><CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Body</CardTitle></CardHeader>
+        <CardContent>
+          <ScrollArea className="h-48 rounded-md border bg-muted/30 p-3">
+            <pre className="text-xs font-mono whitespace-pre-wrap">{item.body || '(empty)'}</pre>
+          </ScrollArea>
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Tasks</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {item.tasks.length === 0 && (
-              <div className="text-sm text-muted-foreground">No tasks yet. Run triage to propose them.</div>
-            )}
-            {item.tasks.map(t => {
-              const run = runs[t.id];
-              const canStart = t.status === AgentTaskStatus.Approved || t.status === AgentTaskStatus.AwaitingReview;
-              return (
-                <div key={t.id} className="rounded-md border p-3">
-                  <div className="flex justify-between items-center gap-2">
-                    <strong className="text-sm">{t.order}. {t.title}</strong>
-                    <Badge variant={taskStatusVariant[t.status]}>{AgentTaskStatusLabel[t.status]}</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground my-2">{t.description}</p>
-                  <div className="flex gap-2">
-                    {t.status === AgentTaskStatus.Proposed && (
-                      <Button size="sm" onClick={() => approveTask(t.id)} disabled={busy !== null}>
-                        {busy === t.id ? <Loader2 className="animate-spin" /> : <Check />}
-                        {busy === t.id ? 'Approving…' : 'Approve'}
-                      </Button>
-                    )}
-                    {canStart && !run && (
-                      <Button size="sm" onClick={() => startTask(t.id)} disabled={busy === t.id}>
-                        {busy === t.id ? <Loader2 className="animate-spin" /> : <Play />}
-                        {busy === t.id ? 'Starting…' : 'Start agent'}
-                      </Button>
-                    )}
-                    {run && (
-                      <>
-                        <Button variant="outline" size="sm" onClick={() => setActiveTab(t.id)}>
-                          <TerminalIcon /> Open terminal
-                        </Button>
-                        <Button variant="ghost" size="sm" className="text-destructive"
-                          onClick={() => stopRun(t.id)} disabled={busy === t.id}>
-                          <Square /> Stop
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Board</CardTitle>
+          {item.tasks.length > 0 && (
+            <span className="text-xs text-muted-foreground">Drag cards between columns to update status</span>
+          )}
+        </CardHeader>
+        <CardContent>
+          {item.tasks.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No tasks yet. Run triage to propose them.</div>
+          ) : (
+            <TaskKanban
+              tasks={item.tasks}
+              runs={runs}
+              busy={busy}
+              onMove={moveTask}
+              onApprove={approveTask}
+              onStart={startTask}
+              onStop={stopRun}
+              onOpenTerminal={setActiveTab}
+            />
+          )}
+        </CardContent>
+      </Card>
 
       {Object.keys(runs).length > 0 && (
         <>
