@@ -9,6 +9,7 @@ public enum WorkItemStatus
     PullRequested = 4,
     Done = 5,
     Cancelled = 6,
+    Closed = 7,
 }
 
 public class WorkItem
