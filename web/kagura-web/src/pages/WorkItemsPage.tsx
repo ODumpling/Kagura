@@ -1,64 +1,117 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { api } from '../api';
-import { type WorkItemSummary, WorkItemStatusLabel } from '../types';
-import { card, errorBox, muted, tableClass, tdClass, thClass, workItemBadge } from '../ui';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { X } from 'lucide-react';
+import { api } from '@/api';
+import { type WorkItemSummary, WorkItemStatus, WorkItemStatusLabel } from '@/types';
+import { useSources } from '@/contexts/SourcesContext';
+import { Card, CardContent } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+
+const statusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline' | 'destructive'> = {
+  [WorkItemStatus.New]: 'outline',
+  [WorkItemStatus.Triaged]: 'secondary',
+  [WorkItemStatus.InProgress]: 'default',
+  [WorkItemStatus.Merged]: 'default',
+  [WorkItemStatus.PullRequested]: 'default',
+  [WorkItemStatus.Done]: 'default',
+  [WorkItemStatus.Cancelled]: 'outline',
+};
 
 export function WorkItemsPage() {
   const [items, setItems] = useState<WorkItemSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sourceId = searchParams.get('sourceId') ?? undefined;
+  const { sources } = useSources();
+
+  const activeSource = useMemo(
+    () => sources.find(s => s.id === sourceId),
+    [sources, sourceId]
+  );
 
   useEffect(() => {
-    api.workItems.list().then(setItems).catch(e => setError(e.message));
-  }, []);
+    api.workItems.list(sourceId).then(setItems).catch(e => setError(e.message));
+  }, [sourceId]);
+
+  function clearFilter() {
+    searchParams.delete('sourceId');
+    setSearchParams(searchParams, { replace: true });
+  }
 
   return (
-    <div>
-      <div className="flex justify-between items-start mb-4">
-        <h2 className="text-xl font-semibold m-0">Work items</h2>
-      </div>
-
-      {error && <div className={errorBox}>{error}</div>}
-
-      <div className={`${card} overflow-hidden`}>
-        <table className={tableClass}>
-          <thead>
-            <tr>
-              <th className={thClass}>External ID</th>
-              <th className={thClass}>Title</th>
-              <th className={thClass}>Source</th>
-              <th className={thClass}>Status</th>
-              <th className={thClass}>Tasks</th>
-              <th className={thClass}>Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map(w => (
-              <tr key={w.id}>
-                <td className={tdClass}>
-                  <code className="px-1.5 py-0.5 rounded bg-slate-800 text-xs">{w.externalId}</code>
-                </td>
-                <td className={tdClass}>
-                  <Link to={`/workitems/${w.id}`} className="text-sky-400 hover:text-sky-300 hover:underline">
-                    {w.title}
-                  </Link>
-                </td>
-                <td className={`${tdClass} ${muted}`}>{w.sourceName}</td>
-                <td className={tdClass}>
-                  <span className={workItemBadge(w.status)}>{WorkItemStatusLabel[w.status]}</span>
-                </td>
-                <td className={tdClass}>{w.taskCount}</td>
-                <td className={`${tdClass} ${muted}`}>{new Date(w.updatedAt).toLocaleString()}</td>
-              </tr>
-            ))}
-            {items.length === 0 && (
-              <tr><td colSpan={6} className={`${tdClass} ${muted} text-center py-6`}>
-                No work items. Sync a source to import some.
-              </td></tr>
+    <div className="space-y-4">
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {activeSource ? activeSource.name : 'All work items'}
+          </h1>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-sm text-muted-foreground">
+              {items.length} item{items.length === 1 ? '' : 's'}
+              {activeSource && <span> in this source</span>}
+            </p>
+            {activeSource && (
+              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearFilter}>
+                <X /> Clear filter
+              </Button>
             )}
-          </tbody>
-        </table>
+          </div>
+        </div>
       </div>
+
+      {error && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
+          {error}
+        </div>
+      )}
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Title</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Tasks</TableHead>
+                <TableHead>Updated</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map(w => (
+                <TableRow key={w.id}>
+                  <TableCell>
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{w.externalId}</code>
+                  </TableCell>
+                  <TableCell>
+                    <Link to={`/workitems/${w.id}`} className="hover:underline font-medium">
+                      {w.title}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{w.sourceName}</TableCell>
+                  <TableCell>
+                    <Badge variant={statusVariant[w.status]}>{WorkItemStatusLabel[w.status]}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{w.taskCount}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {new Date(w.updatedAt).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {items.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    No work items. Sync a source to import some.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

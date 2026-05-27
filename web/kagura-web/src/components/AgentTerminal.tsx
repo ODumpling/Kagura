@@ -87,16 +87,16 @@ export function AgentTerminal({ runId, onExit }: Props) {
   }, [runId, onExit]);
 
   const statusColor =
-    status === 'live' ? 'text-green-400'
-    : status === 'connecting' ? 'text-amber-400'
-    : 'text-slate-500';
+    status === 'live' ? 'text-green-500'
+    : status === 'connecting' ? 'text-amber-500'
+    : 'text-muted-foreground';
   const statusLabel =
     status === 'live' ? '● live'
     : status === 'connecting' ? '· connecting'
     : '○ exited';
 
   return (
-    <div className="rounded-md border border-slate-700 bg-[#0e1116] p-2">
+    <div className="rounded-md border bg-[#0e1116] p-2">
       <div className={`text-[11px] px-2 py-1 ${statusColor}`}>{statusLabel}</div>
       <div ref={containerRef} className="h-[480px]" />
     </div>
