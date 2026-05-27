@@ -1,4 +1,5 @@
 using Kagura.Api.Endpoints;
+using Kagura.Api.HostedServices;
 using Kagura.Api.Hubs;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
@@ -68,6 +69,14 @@ builder.Services.AddSingleton(new AgentRunnerOptions
 });
 builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
 builder.Services.AddSingleton<IAgentRunner, AgentRunner>();
+
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(new WorkItemCleanupOptions
+{
+    Interval = devflow.GetValue<TimeSpan?>("WorkItemCleanup:Interval") ?? TimeSpan.FromHours(1),
+    Retention = devflow.GetValue<TimeSpan?>("WorkItemCleanup:Retention") ?? TimeSpan.FromDays(7),
+});
+builder.Services.AddHostedService<WorkItemCleanupService>();
 
 builder.Services.AddOpenApi();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
