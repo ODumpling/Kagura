@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Kagura.Data.Migrations
 {
     [DbContext(typeof(KaguraDbContext))]
-    [Migration("20260527153230_AddIncludeInPullRequestToAgentTask")]
-    partial class AddIncludeInPullRequestToAgentTask
+    [Migration("20260527162257_AddReviewNotes")]
+    partial class AddReviewNotes
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -71,13 +71,11 @@ namespace Kagura.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("IncludeInPullRequest")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(true);
-
                     b.Property<int>("Order")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("ReviewNotes")
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");

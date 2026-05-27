@@ -4,10 +4,12 @@ public interface IAgentBroadcaster
 {
     Task DataAsync(Guid runId, byte[] data);
     Task ExitAsync(Guid runId, int? exitCode);
+    Task WorkItemUpdatedAsync(Guid workItemId);
 }
 
 public class NullAgentBroadcaster : IAgentBroadcaster
 {
     public Task DataAsync(Guid runId, byte[] data) => Task.CompletedTask;
     public Task ExitAsync(Guid runId, int? exitCode) => Task.CompletedTask;
+    public Task WorkItemUpdatedAsync(Guid workItemId) => Task.CompletedTask;
 }

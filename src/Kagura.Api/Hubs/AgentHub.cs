@@ -35,6 +35,12 @@ public class AgentHub : Hub
 
     public Task Leave(string runId) => Groups.RemoveFromGroupAsync(Context.ConnectionId, runId);
 
+    public Task JoinWorkItem(string workItemId) =>
+        Groups.AddToGroupAsync(Context.ConnectionId, $"wi-{workItemId}");
+
+    public Task LeaveWorkItem(string workItemId) =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, $"wi-{workItemId}");
+
     public async Task Input(string runId, string base64Bytes)
     {
         var session = _runner.Get(Guid.Parse(runId));

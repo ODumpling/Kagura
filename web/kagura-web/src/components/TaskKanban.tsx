@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { DragEvent } from 'react';
-import { Play, Square, Terminal as TerminalIcon, Check, Loader2 } from 'lucide-react';
+import { Play, Square, Terminal as TerminalIcon, Check, Loader2, RotateCcw } from 'lucide-react';
 import { type AgentRunDto, type AgentTaskDto, AgentTaskStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,12 +31,13 @@ interface Props {
   onApprove: (taskId: string) => void;
   onStart: (taskId: string) => void;
   onStop: (taskId: string) => void;
+  onReset: (taskId: string) => void;
   onOpenTerminal: (taskId: string) => void;
   onOpenTask: (taskId: string) => void;
   onToggleInclude: (taskId: string, include: boolean) => void;
 }
 
-export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onStop, onOpenTerminal, onOpenTask, onToggleInclude }: Props) {
+export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onStop, onReset, onOpenTerminal, onOpenTask, onToggleInclude }: Props) {
   const [dragOver, setDragOver] = useState<AgentTaskStatus | null>(null);
 
   const visibleColumns = COLUMNS.filter(c => c.alwaysShow || tasks.some(t => t.status === c.status));
@@ -77,7 +78,7 @@ export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onSt
               )}
               {colTasks.map(t => {
                 const run = runs[t.id];
-                const canStart = t.status === AgentTaskStatus.Approved || t.status === AgentTaskStatus.AwaitingReview;
+                const canStart = t.status === AgentTaskStatus.Approved;
                 const draggable = t.status !== AgentTaskStatus.Running;
                 return (
                   <div
@@ -126,6 +127,12 @@ export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onSt
                             <Square /> Stop
                           </Button>
                         </>
+                      )}
+                      {t.status === AgentTaskStatus.Running && !run && (
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => onReset(t.id)} disabled={busy === t.id} title="No live agent for this task. Reset moves it back to Approved.">
+                          {busy === t.id ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                          Reset
+                        </Button>
                       )}
                     </div>
                   </div>

@@ -1,5 +1,7 @@
+using Kagura.Core.Agents;
 using Kagura.Core.Domain;
 using Kagura.Core.Git;
+using Kagura.Core.Review;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -44,9 +46,13 @@ public record AgentTaskDto(
     AgentTaskStatus Status,
     string? BranchName,
     string? WorktreePath,
-    bool IncludeInPullRequest);
+    bool IncludeInPullRequest,
+    string? ReviewNotes = null);
 
 public record UpdateIncludeInPullRequestDto(bool IncludeInPullRequest);
+
+public record AutoReviewItemResultDto(Guid TaskId, string Title, bool AutoMerged, bool Merged, string Reasoning);
+public record AutoReviewResultDto(int Reviewed, int AutoMerged, int FlaggedForHuman, IReadOnlyList<AutoReviewItemResultDto> Items);
 
 public record FinishWorkItemResultDto(
     Guid Id,
@@ -102,7 +108,7 @@ public static class WorkItemEndpoints
                 w.Id, w.SourceId, w.Source.Name, w.ExternalId, w.Title, w.Body,
                 w.Status, w.Url, w.Labels, w.BranchName, w.PullRequestUrl,
                 w.UpdatedAt, w.TriagedAt,
-                w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest)).ToList()));
+                w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest, t.ReviewNotes)).ToList()));
         });
 
         grp.MapGet("/{id:guid}/pr-preview", async (
@@ -155,6 +161,7 @@ public static class WorkItemEndpoints
             Guid taskId,
             KaguraDbContext db,
             GitService git,
+            IAgentBroadcaster broadcaster,
             CancellationToken ct) =>
         {
             var wi = await db.WorkItems
@@ -179,8 +186,9 @@ public static class WorkItemEndpoints
             wi.BranchName ??= git.WorkItemBranchName(wi);
             wi.UpdatedAt = now;
             await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
 
-            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest));
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest, task.ReviewNotes));
         });
 
         grp.MapMethods("/{workItemId:guid}/tasks/{taskId:guid}/include", new[] { "PATCH" }, async (
@@ -198,13 +206,14 @@ public static class WorkItemEndpoints
             task.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
 
-            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest));
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest, task.ReviewNotes));
         });
 
         grp.MapPost("/{id:guid}/finish", async (
             Guid id,
             KaguraDbContext db,
             GitService git,
+            IAgentBroadcaster broadcaster,
             ILogger<Program> log,
             CancellationToken ct) =>
         {
@@ -274,9 +283,97 @@ public static class WorkItemEndpoints
                 prError = ex.Message;
             }
 
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
             return Results.Ok(new FinishWorkItemResultDto(
                 wi.Id, wi.Status, wi.BranchName, wi.PullRequestUrl,
                 merged, alreadyMerged, prError));
+        });
+
+        // For every AwaitingReview task on this work item, ask the review service whether
+        // the diff is safe to auto-merge. Tasks marked auto-mergeable are merged; the rest
+        // stay in AwaitingReview with ReviewNotes explaining why a human should look.
+        grp.MapPost("/{id:guid}/auto-review", async (
+            Guid id,
+            KaguraDbContext db,
+            GitService git,
+            IReviewService reviewer,
+            IAgentBroadcaster broadcaster,
+            ILogger<Program> log,
+            CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems
+                .Include(w => w.Source)
+                .Include(w => w.Tasks)
+                .FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (wi is null) return Results.NotFound();
+
+            var queue = wi.Tasks
+                .Where(t => t.Status == AgentTaskStatus.AwaitingReview)
+                .OrderBy(t => t.Order)
+                .ToList();
+            if (queue.Count == 0)
+                return Results.BadRequest(new { error = "No tasks in AwaitingReview." });
+
+            var repoPath = wi.Source.LocalRepoPath;
+            var items = new List<AutoReviewItemResultDto>();
+            var autoMergedCount = 0;
+            var flaggedCount = 0;
+            var now = DateTime.UtcNow;
+
+            foreach (var task in queue)
+            {
+                string reasoning;
+                bool autoMerge;
+                try
+                {
+                    var diff = await git.DiffTaskAgainstWorkItemAsync(repoPath, wi, task, ct);
+                    var verdict = await reviewer.ReviewAsync(task.Title, task.Description, diff, ct);
+                    autoMerge = verdict.AutoMerge;
+                    reasoning = verdict.Reasoning;
+                }
+                catch (Exception ex)
+                {
+                    log.LogError(ex, "Auto-review threw for task {TaskId}", task.Id);
+                    autoMerge = false;
+                    reasoning = $"Review failed: {ex.Message}";
+                }
+
+                if (!autoMerge)
+                {
+                    task.ReviewNotes = reasoning;
+                    task.UpdatedAt = now;
+                    flaggedCount++;
+                    items.Add(new AutoReviewItemResultDto(task.Id, task.Title, false, false, reasoning));
+                    continue;
+                }
+
+                try
+                {
+                    await git.MergeTaskBranchAsync(repoPath, wi, task, ct);
+                    if (!string.IsNullOrEmpty(task.WorktreePath))
+                        await git.RemoveWorktreeAsync(repoPath, task.WorktreePath, ct);
+                    task.Status = AgentTaskStatus.Merged;
+                    task.ReviewNotes = reasoning;
+                    task.UpdatedAt = now;
+                    wi.BranchName ??= git.WorkItemBranchName(wi);
+                    autoMergedCount++;
+                    items.Add(new AutoReviewItemResultDto(task.Id, task.Title, true, true, reasoning));
+                }
+                catch (Exception ex)
+                {
+                    log.LogError(ex, "Auto-merge failed for task {TaskId} after positive review", task.Id);
+                    task.ReviewNotes = $"Reviewer approved auto-merge but git merge failed: {ex.Message}";
+                    task.UpdatedAt = now;
+                    flaggedCount++;
+                    items.Add(new AutoReviewItemResultDto(task.Id, task.Title, true, false, task.ReviewNotes));
+                }
+            }
+
+            wi.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
+
+            return Results.Ok(new AutoReviewResultDto(queue.Count, autoMergedCount, flaggedCount, items));
         });
 
         return app;

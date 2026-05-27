@@ -2,6 +2,7 @@ using Kagura.Api.Endpoints;
 using Kagura.Api.Hubs;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
+using Kagura.Core.Review;
 using Kagura.Core.Sources;
 using Kagura.Core.Triage;
 using Kagura.Data;
@@ -38,6 +39,13 @@ builder.Services.Configure<TriageOptions>(opt =>
 });
 builder.Services.AddScoped<ITriageService, ClaudeCliTriageService>();
 
+builder.Services.Configure<ReviewOptions>(opt =>
+{
+    opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+    opt.Model = builder.Configuration["Review:Model"];
+});
+builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
+
 builder.Services.AddSingleton(sp =>
     new GitService(devflow["WorktreesRoot"] ?? "~/.devflow/worktrees",
         sp.GetRequiredService<ILogger<GitService>>()));
@@ -48,6 +56,8 @@ builder.Services.AddSingleton(new AgentRunnerOptions
     MaxConcurrentAgents = devflow.GetValue<int?>("MaxConcurrentAgents") ?? 3,
     ClaudeBinary = devflow["ClaudeBinary"] ?? "claude",
     TranscriptsRoot = devflow["TranscriptsRoot"] ?? "~/.devflow/transcripts",
+    ApiBaseUrl = devflow["ApiBaseUrl"] ?? "http://localhost:5253",
+    PromptTemplate = devflow["PromptTemplate"] ?? AgentRunnerOptions.DefaultPromptTemplate,
 });
 builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
 builder.Services.AddSingleton<IAgentRunner, AgentRunner>();

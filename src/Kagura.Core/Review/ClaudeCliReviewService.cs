@@ -1,0 +1,144 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace Kagura.Core.Review;
+
+public class ReviewOptions
+{
+    public string ClaudeBinary { get; set; } = "claude";
+    public string? Model { get; set; }
+    public int MaxDiffBytes { get; set; } = 50_000;
+}
+
+public class ClaudeCliReviewService : IReviewService
+{
+    private const string SystemPrompt =
+        """
+        You are an automated code reviewer for a developer workflow tool. You receive a task
+        description and a git diff of an autonomous agent's changes. Decide whether the diff
+        is safe to merge automatically or whether it needs human review.
+
+        Mark autoMerge=true when ALL of these hold:
+        - The diff implements what the task description says, with nothing unrelated.
+        - The changes are reasonably small / focused.
+        - No obvious security, data-loss, or destructive risks.
+        - No suspicious patterns (broad permission grants, disabled tests, eval/exec, secrets).
+
+        Mark autoMerge=false when ANY of these hold:
+        - The diff is empty, off-topic, or doesn't match the task.
+        - The change is large, sprawling, or touches sensitive areas (auth, payments, migrations, infra).
+        - The intent is unclear or the test coverage looks insufficient.
+        - Anything that would make a thoughtful human reviewer pause.
+
+        Respond with ONLY a JSON object, no prose, no markdown fences:
+        {"autoMerge": true|false, "reasoning": "1-3 sentences explaining the decision"}
+        """;
+
+    private readonly ReviewOptions _options;
+    private readonly ILogger<ClaudeCliReviewService> _log;
+
+    public ClaudeCliReviewService(IOptions<ReviewOptions> options, ILogger<ClaudeCliReviewService> log)
+    {
+        _options = options.Value;
+        _log = log;
+    }
+
+    public async Task<ReviewVerdict> ReviewAsync(
+        string taskTitle, string taskDescription, string diff, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(diff))
+            return new ReviewVerdict(false, "Diff was empty — nothing to review.");
+
+        var truncated = diff.Length > _options.MaxDiffBytes;
+        var diffForLlm = truncated ? diff[.._options.MaxDiffBytes] : diff;
+
+        var userPrompt =
+            $"""
+             Task title: {taskTitle}
+
+             Task description:
+             {taskDescription}
+
+             Diff{(truncated ? $" (truncated to {_options.MaxDiffBytes} bytes of {diff.Length})" : "")}:
+             ```diff
+             {diffForLlm}
+             ```
+             """;
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = _options.ClaudeBinary,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-p");
+        psi.ArgumentList.Add(userPrompt);
+        psi.ArgumentList.Add("--append-system-prompt");
+        psi.ArgumentList.Add(SystemPrompt);
+        psi.ArgumentList.Add("--output-format");
+        psi.ArgumentList.Add("json");
+        if (!string.IsNullOrWhiteSpace(_options.Model))
+        {
+            psi.ArgumentList.Add("--model");
+            psi.ArgumentList.Add(_options.Model);
+        }
+
+        using var process = new Process { StartInfo = psi };
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        await using var _ = ct.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+        });
+
+        await process.WaitForExitAsync(ct);
+
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"claude CLI exited with code {process.ExitCode}. stderr: {stderr.ToString().Trim()}");
+
+        var envelope = JsonSerializer.Deserialize<ClaudeCliResult>(stdout.ToString(), JsonOpts)
+            ?? throw new InvalidOperationException($"Could not parse claude CLI JSON envelope. stdout: {stdout}");
+
+        if (envelope.IsError || string.IsNullOrWhiteSpace(envelope.Result))
+            throw new InvalidOperationException(
+                $"claude CLI returned error envelope. subtype={envelope.Subtype} result={envelope.Result}");
+
+        var json = ExtractJsonObject(envelope.Result);
+        var verdict = JsonSerializer.Deserialize<ReviewVerdict>(json, JsonOpts)
+                      ?? throw new InvalidOperationException("Could not parse review verdict JSON");
+
+        _log.LogInformation("Review verdict for '{Title}': autoMerge={AutoMerge}", taskTitle, verdict.AutoMerge);
+        return verdict;
+    }
+
+    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+
+    private static string ExtractJsonObject(string text)
+    {
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        if (start < 0 || end <= start)
+            throw new InvalidOperationException($"Review response did not contain a JSON object. Got: {text}");
+        return text[start..(end + 1)];
+    }
+
+    private sealed record ClaudeCliResult(
+        [property: JsonPropertyName("result")] string? Result,
+        [property: JsonPropertyName("subtype")] string? Subtype,
+        [property: JsonPropertyName("is_error")] bool IsError);
+}

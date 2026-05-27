@@ -5,24 +5,23 @@
 namespace Kagura.Data.Migrations
 {
     /// <inheritdoc />
-    public partial class AddIncludeInPullRequestToAgentTask : Migration
+    public partial class AddReviewNotes : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<bool>(
-                name: "IncludeInPullRequest",
+            migrationBuilder.AddColumn<string>(
+                name: "ReviewNotes",
                 table: "AgentTasks",
-                type: "INTEGER",
-                nullable: false,
-                defaultValue: true);
+                type: "TEXT",
+                nullable: true);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "IncludeInPullRequest",
+                name: "ReviewNotes",
                 table: "AgentTasks");
         }
     }

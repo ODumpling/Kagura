@@ -11,6 +11,76 @@ public class AgentRunnerOptions
     public int MaxConcurrentAgents { get; set; } = 3;
     public string ClaudeBinary { get; set; } = "claude";
     public string TranscriptsRoot { get; set; } = "~/.devflow/transcripts";
+    public string ApiBaseUrl { get; set; } = "http://localhost:5253";
+    public string PromptTemplate { get; set; } = DefaultPromptTemplate;
+
+    public const string DefaultPromptTemplate = """
+        # THE TASK
+
+        You have ONE task to complete. Nothing else.
+
+        Task: {{TASK}}
+        Branch: {{BRANCH}}
+
+        Do not pick up adjacent work, related cleanup, or anything else you notice while exploring. If it's not required to finish this single task, leave it alone.
+
+        # PARENT CONTEXT (read-only)
+
+        Pull the parent work item using `{{VIEW_TASK_COMMAND}}` for context only. If it references a parent PRD, skim that too. Use this to understand scope — not to expand it.
+
+        Recent commits on this repo:
+
+        <recent-commits>
+
+        !`git log -n 10 --format="%H%n%ad%n%B---" --date=short`
+
+        </recent-commits>
+
+        # EXPLORATION
+
+        Explore only the parts of the repo needed to complete this task. Pay attention to tests that touch the code you'll change.
+
+        Stop exploring once you have enough context for this task. Do not survey the whole codebase.
+
+        # EXECUTION
+
+        If applicable, use RGR:
+
+        1. RED: write one test for this task
+        2. GREEN: implement just enough to pass
+        3. REPEAT until this task is done
+        4. REFACTOR only what you touched
+
+        # FEEDBACK LOOPS
+
+        Before committing, run the test and build commands to confirm they pass.
+
+        # COMMIT
+
+        Make a single git commit for this task. The commit message must:
+
+        1. Start with `Kagura:` prefix
+        2. State the task completed + parent reference
+        3. Key decisions made
+        4. Files changed
+        5. Blockers or notes for the next iteration
+
+        Keep it concise. One task, one commit.
+
+        # COMPLETION
+
+        If the task is not complete, leave a comment on the parent work item describing what was done and what remains. Do not close it — that happens later.
+
+        Once the task is complete, mark it ready for review:
+
+        `curl -fsS -X POST "{{COMPLETE_URL}}"`
+
+        Then output <promise>COMPLETE</promise> and stop.
+
+        # FINAL RULES
+
+        ONLY WORK ON THIS ONE TASK. Do not start, plan, or commit work for any other task — even if it looks trivial or related.
+        """;
 }
 
 public interface IAgentRunner
@@ -52,12 +122,15 @@ public class AgentRunner : IAgentRunner
         try
         {
             var worktreePath = await _git.CreateTaskWorktreeAsync(repoPath, wi, task, ct);
+            var taskBranch = _git.TaskBranchName(wi, task);
 
             var runId = Guid.NewGuid();
             var transcriptPath = Path.Combine(
                 ResolveHome(_opts.TranscriptsRoot),
                 wi.Id.ToString("N"),
                 $"{task.Id:N}_{runId:N}.log");
+
+            var prompt = RenderPrompt(wi, task, taskBranch);
 
             var options = new PtyOptions
             {
@@ -66,7 +139,7 @@ public class AgentRunner : IAgentRunner
                 Rows = 32,
                 Cwd = worktreePath,
                 App = _opts.ClaudeBinary,
-                CommandLine = Array.Empty<string>(),
+                CommandLine = new[] { "--permission-mode", "auto", prompt },
                 Environment = BuildEnv(task),
             };
 
@@ -120,6 +193,20 @@ public class AgentRunner : IAgentRunner
         env["KAGURA_TASK_TITLE"] = task.Title;
         return env;
     }
+
+    private string RenderPrompt(WorkItem wi, AgentTask task, string branch) =>
+        _opts.PromptTemplate
+            .Replace("{{TASK}}", task.Description)
+            .Replace("{{ISSUE_TITLE}}", task.Title)
+            .Replace("{{VIEW_TASK_COMMAND}}", ViewTaskCommand(wi))
+            .Replace("{{BRANCH}}", branch)
+            .Replace("{{COMPLETE_URL}}", $"{_opts.ApiBaseUrl.TrimEnd('/')}/api/agents/complete/{task.Id}");
+
+    private static string ViewTaskCommand(WorkItem wi) => wi.Source.Type switch
+    {
+        SourceType.GitHub => $"gh issue view {wi.ExternalId}",
+        _ => $"echo 'Issue {wi.ExternalId}: {wi.Title.Replace("'", "")}'",
+    };
 
     private static string ResolveHome(string path) =>
         path.StartsWith("~/") ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..]) : path;

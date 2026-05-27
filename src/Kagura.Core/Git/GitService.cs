@@ -28,8 +28,10 @@ public partial class GitService
     public string WorkItemBranchName(WorkItem wi) =>
         $"devflow/{Slug(wi.ExternalId)}-{Slug(wi.Title, 30)}";
 
+    // Use `--` (not `/`) so task branches are siblings of the work-item branch.
+    // Git forbids both `foo` and `foo/bar` existing as refs.
     public string TaskBranchName(WorkItem wi, AgentTask task) =>
-        $"{WorkItemBranchName(wi)}/{task.Order:D2}-{Slug(task.Title, 30)}";
+        $"{WorkItemBranchName(wi)}--{task.Order:D2}-{Slug(task.Title, 30)}";
 
     public string TaskWorktreePath(WorkItem wi, AgentTask task) =>
         Path.Combine(_worktreesRoot, Slug(wi.ExternalId), $"{task.Order:D2}-{Slug(task.Title, 30)}");
@@ -96,6 +98,15 @@ public partial class GitService
         {
             await ProcessRunner.RunAsync("git", new[] { "checkout", originalRef }, repoPath, ct);
         }
+    }
+
+    public async Task<string> DiffTaskAgainstWorkItemAsync(string repoPath, WorkItem wi, AgentTask task, CancellationToken ct = default)
+    {
+        var workItemBranch = WorkItemBranchName(wi);
+        var taskBranch = TaskBranchName(wi, task);
+        var r = await ProcessRunner.RunAsync("git",
+            new[] { "diff", $"{workItemBranch}...{taskBranch}" }, repoPath, ct);
+        return r.Success ? r.Stdout : "";
     }
 
     public async Task RemoveWorktreeAsync(string repoPath, string worktreePath, CancellationToken ct = default)

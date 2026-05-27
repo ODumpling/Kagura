@@ -64,6 +64,15 @@ export function TaskReviewDialog({ task, busy, onClose, onApprove, onReject, onM
                 : <p className="text-xs italic text-muted-foreground">(no description)</p>}
             </ScrollArea>
 
+            {task.reviewNotes && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                  Auto-review notes
+                </div>
+                <p className="text-muted-foreground">{task.reviewNotes}</p>
+              </div>
+            )}
+
             <DialogFooter showCloseButton={!isProposed && !isAwaitingReview}>
               {isProposed && (
                 <>

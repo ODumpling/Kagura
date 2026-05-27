@@ -17,4 +17,7 @@ public class SignalRAgentBroadcaster : IAgentBroadcaster
 
     public Task ExitAsync(Guid runId, int? exitCode) =>
         _hub.Clients.Group(runId.ToString()).SendAsync("exit", runId.ToString(), exitCode);
+
+    public Task WorkItemUpdatedAsync(Guid workItemId) =>
+        _hub.Clients.Group($"wi-{workItemId}").SendAsync("workItemUpdated", workItemId.ToString());
 }

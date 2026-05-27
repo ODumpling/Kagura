@@ -76,6 +76,9 @@ namespace Kagura.Data.Migrations
                     b.Property<int>("Order")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ReviewNotes")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
 

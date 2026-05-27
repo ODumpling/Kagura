@@ -69,6 +69,7 @@ export interface AgentTaskDto {
   branchName: string | null;
   worktreePath: string | null;
   includeInPullRequest: boolean;
+  reviewNotes: string | null;
 }
 
 export interface PreviewConflict {
@@ -94,6 +95,21 @@ export interface WorkItemPreview {
   conflicts: PreviewConflict[];
   taskShas: PreviewTaskSha[];
   stats: PreviewStats;
+}
+
+export interface AutoReviewItemResult {
+  taskId: string;
+  title: string;
+  autoMerged: boolean;
+  merged: boolean;
+  reasoning: string;
+}
+
+export interface AutoReviewResult {
+  reviewed: number;
+  autoMerged: number;
+  flaggedForHuman: number;
+  items: AutoReviewItemResult[];
 }
 
 export interface WorkItemDetail extends WorkItemSummary {

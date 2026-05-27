@@ -7,9 +7,10 @@ import { base64ToBytes, bytesToBase64, getConnection } from '../signalr';
 interface Props {
   runId: string;
   onExit?: (code: number | null) => void;
+  className?: string;
 }
 
-export function AgentTerminal({ runId, onExit }: Props) {
+export function AgentTerminal({ runId, onExit, className }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -96,9 +97,9 @@ export function AgentTerminal({ runId, onExit }: Props) {
     : '○ exited';
 
   return (
-    <div className="rounded-md border bg-[#0e1116] p-2">
-      <div className={`text-[11px] px-2 py-1 ${statusColor}`}>{statusLabel}</div>
-      <div ref={containerRef} className="h-[480px]" />
+    <div className={`rounded-md border bg-[#0e1116] p-2 flex flex-col min-h-0 ${className ?? 'h-[480px]'}`}>
+      <div className={`text-[11px] px-2 py-1 shrink-0 ${statusColor}`}>{statusLabel}</div>
+      <div ref={containerRef} className="flex-1 min-h-0" />
     </div>
   );
 }
