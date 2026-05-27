@@ -35,12 +35,12 @@ public class WorkItem
 
     public List<AgentTask> Tasks { get; set; } = new();
 
-    public void MarkClosed()
+    public void MarkClosed(DateTime? now = null)
     {
         if (Status == WorkItemStatus.Closed && ClosedAt is not null) return;
+        var stamp = now ?? DateTime.UtcNow;
         Status = WorkItemStatus.Closed;
-        var now = DateTime.UtcNow;
-        ClosedAt ??= now;
-        UpdatedAt = now;
+        ClosedAt ??= stamp;
+        UpdatedAt = stamp;
     }
 }

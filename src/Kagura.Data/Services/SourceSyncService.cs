@@ -73,8 +73,7 @@ public class SourceSyncService
         {
             if (w.Status == WorkItemStatus.Closed) continue;
             if (fetchedIds.Contains(externalId)) continue;
-            w.Status = WorkItemStatus.Closed;
-            w.UpdatedAt = now;
+            w.MarkClosed(now);
             closed++;
         }
 
