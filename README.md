@@ -40,7 +40,7 @@ Per work item: a branch `devflow/<external-id>-<slug>` is cut from the repo's de
 # One command — the Aspire AppHost orchestrates the API + Vite frontend
 # together, injects the API URL into the frontend, and opens a dashboard
 # with logs, traces, and health for both processes.
-dotnet run --project src/Kagura.AppHost   # or: ./dev.sh
+dotnet run --project src/Kagura.AppHost
 # → Aspire dashboard prints its own URL on startup
 # → API at http://localhost:5253
 # → Web at http://localhost:5173
