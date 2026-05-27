@@ -1,3 +1,4 @@
+using Kagura.Core.Agents;
 using Kagura.Core.Domain;
 using Kagura.Core.Git;
 using Kagura.Data;
@@ -93,6 +94,7 @@ public static class WorkItemEndpoints
             Guid taskId,
             KaguraDbContext db,
             GitService git,
+            IAgentBroadcaster broadcaster,
             CancellationToken ct) =>
         {
             var wi = await db.WorkItems
@@ -117,6 +119,7 @@ public static class WorkItemEndpoints
             wi.BranchName ??= git.WorkItemBranchName(wi);
             wi.UpdatedAt = now;
             await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
 
             return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
         });
@@ -125,6 +128,7 @@ public static class WorkItemEndpoints
             Guid id,
             KaguraDbContext db,
             GitService git,
+            IAgentBroadcaster broadcaster,
             ILogger<Program> log,
             CancellationToken ct) =>
         {
@@ -194,6 +198,7 @@ public static class WorkItemEndpoints
                 prError = ex.Message;
             }
 
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
             return Results.Ok(new FinishWorkItemResultDto(
                 wi.Id, wi.Status, wi.BranchName, wi.PullRequestUrl,
                 merged, alreadyMerged, prError));

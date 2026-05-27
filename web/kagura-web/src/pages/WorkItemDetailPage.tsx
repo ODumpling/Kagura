@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink } from 'lucide-react';
+import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play } from 'lucide-react';
 import { api } from '@/api';
+import { getConnection } from '@/signalr';
 import { type AgentRunDto, AgentTaskStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
-import { AgentTerminal } from '@/components/AgentTerminal';
+import { AgentTerminalDialog } from '@/components/AgentTerminalDialog';
 import { Markdown } from '@/components/Markdown';
 import { TaskKanban } from '@/components/TaskKanban';
 import { TaskReviewDialog } from '@/components/TaskReviewDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -30,23 +30,47 @@ export function WorkItemDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, AgentRunDto>>({});
-  const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [terminalTaskId, setTerminalTaskId] = useState<string | null>(null);
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    if (!id) return;
-    setItem(await api.workItems.get(id));
-  }, [id]);
-
-  useEffect(() => { reload().catch(e => setError(e.message)); }, [reload]);
-
-  useEffect(() => {
-    api.agents.listActive().then(active => {
+  const reloadRuns = useCallback(async () => {
+    try {
+      const active = await api.agents.listActive();
       const map: Record<string, AgentRunDto> = {};
       for (const r of active) map[r.taskId] = r;
       setRuns(map);
-    }).catch(() => {});
-  }, [item?.id]);
+    } catch { /* ignore */ }
+  }, []);
+
+  const reload = useCallback(async () => {
+    if (!id) return;
+    const [next] = await Promise.all([api.workItems.get(id), reloadRuns()]);
+    setItem(next);
+  }, [id, reloadRuns]);
+
+  useEffect(() => { reload().catch(e => setError(e.message)); }, [reload]);
+
+  // Subscribe to real-time work-item updates over SignalR.
+  useEffect(() => {
+    if (!id) return;
+    let active = true;
+    let cleanup = () => {};
+    (async () => {
+      const conn = await getConnection();
+      if (!active) return;
+      const onUpdate = (incomingId: string) => {
+        if (incomingId !== id) return;
+        reload().catch(() => {});
+      };
+      conn.on('workItemUpdated', onUpdate);
+      await conn.invoke('JoinWorkItem', id);
+      cleanup = () => {
+        conn.off('workItemUpdated', onUpdate);
+        conn.invoke('LeaveWorkItem', id).catch(() => {});
+      };
+    })().catch(() => {});
+    return () => { active = false; cleanup(); };
+  }, [id, reload]);
 
   if (!item) {
     return error
@@ -83,7 +107,7 @@ export function WorkItemDetailPage() {
     try {
       const run = await api.agents.start(taskId);
       setRuns(r => ({ ...r, [taskId]: run }));
-      setActiveTab(taskId);
+      setTerminalTaskId(taskId);
       await reload();
     } catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
@@ -91,7 +115,25 @@ export function WorkItemDetailPage() {
   async function stopRun(taskId: string) {
     const run = runs[taskId]; if (!run) return;
     setBusy(taskId);
-    try { await api.agents.stop(run.runId); setRuns(r => { const c = { ...r }; delete c[taskId]; return c; }); }
+    try {
+      await api.agents.stop(run.runId);
+      setRuns(r => { const c = { ...r }; delete c[taskId]; return c; });
+      setTerminalTaskId(t => t === taskId ? null : t);
+      await reload();
+    }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+  async function resetTask(taskId: string) {
+    setBusy(taskId); setError(null);
+    try { await api.agents.reset(taskId); await reload(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+  async function startAll() {
+    if (!item) return;
+    setBusy('start-all'); setError(null);
+    try { await api.agents.startAll(item.id); /* kanban auto-refreshes via SignalR */ }
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
@@ -122,6 +164,7 @@ export function WorkItemDetailPage() {
   }
 
   const hasProposed = item.tasks.some(t => t.status === AgentTaskStatus.Proposed);
+  const hasApproved = item.tasks.some(t => t.status === AgentTaskStatus.Approved);
   const hasRunning = item.tasks.some(t => t.status === AgentTaskStatus.Running);
   const reviewable = item.tasks.filter(t => t.status === AgentTaskStatus.AwaitingReview).length;
   const mergedCount = item.tasks.filter(t => t.status === AgentTaskStatus.Merged).length;
@@ -150,6 +193,12 @@ export function WorkItemDetailPage() {
             <Button onClick={approveAll} disabled={busy !== null}>
               {busy === 'approve' ? <Loader2 className="animate-spin" /> : <CheckCheck />}
               {busy === 'approve' ? 'Approving…' : 'Approve all'}
+            </Button>
+          )}
+          {hasApproved && (
+            <Button onClick={startAll} disabled={busy !== null}>
+              {busy === 'start-all' ? <Loader2 className="animate-spin" /> : <Play />}
+              {busy === 'start-all' ? 'Queuing…' : 'Start all'}
             </Button>
           )}
           {canFinish && (
@@ -228,7 +277,8 @@ export function WorkItemDetailPage() {
                   onApprove={approveTask}
                   onStart={startTask}
                   onStop={stopRun}
-                  onOpenTerminal={setActiveTab}
+                  onReset={resetTask}
+                  onOpenTerminal={setTerminalTaskId}
                   onOpenTask={setReviewTaskId}
                 />
               )}
@@ -246,38 +296,13 @@ export function WorkItemDetailPage() {
         onMerge={mergeTask}
       />
 
-      {Object.keys(runs).length > 0 && (
-        <>
-          <Separator />
-          <Card>
-            <CardHeader><CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Active agents</CardTitle></CardHeader>
-            <CardContent>
-              <div className="flex gap-1 flex-wrap mb-3">
-                {Object.entries(runs).map(([taskId, run]) => {
-                  const task = item.tasks.find(t => t.id === taskId);
-                  return (
-                    <Button
-                      key={taskId}
-                      variant={activeTab === taskId ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setActiveTab(taskId)}
-                    >
-                      {task?.title ?? run.runId.slice(0, 8)}
-                    </Button>
-                  );
-                })}
-              </div>
-              {activeTab && runs[activeTab] && (
-                <AgentTerminal
-                  key={runs[activeTab].runId}
-                  runId={runs[activeTab].runId}
-                  onExit={() => reload()}
-                />
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
+      <AgentTerminalDialog
+        task={terminalTaskId ? item.tasks.find(t => t.id === terminalTaskId) ?? null : null}
+        run={terminalTaskId ? runs[terminalTaskId] ?? null : null}
+        busy={busy}
+        onClose={() => setTerminalTaskId(null)}
+        onStop={stopRun}
+      />
     </div>
   );
 }

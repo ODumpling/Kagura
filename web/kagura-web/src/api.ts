@@ -54,6 +54,8 @@ export const api = {
   agents: {
     listActive: () => http<AgentRunDto[]>('GET', '/api/agents'),
     start: (taskId: string) => http<AgentRunDto>('POST', `/api/agents/start/${taskId}`),
+    startAll: (workItemId: string) => http<{ queued: number }>('POST', `/api/agents/start-all/${workItemId}`),
     stop: (runId: string) => http<void>('POST', `/api/agents/${runId}/stop`),
+    reset: (taskId: string) => http<void>('POST', `/api/agents/reset/${taskId}`),
   },
 };

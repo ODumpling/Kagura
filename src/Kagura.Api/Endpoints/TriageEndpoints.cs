@@ -1,3 +1,4 @@
+using Kagura.Core.Agents;
 using Kagura.Core.Domain;
 using Kagura.Core.Triage;
 using Kagura.Data;
@@ -17,7 +18,7 @@ public static class TriageEndpoints
     {
         var grp = app.MapGroup("/api/workitems/{workItemId:guid}");
 
-        grp.MapPost("/triage", async (Guid workItemId, KaguraDbContext db, ITriageService triage, CancellationToken ct) =>
+        grp.MapPost("/triage", async (Guid workItemId, KaguraDbContext db, ITriageService triage, IAgentBroadcaster broadcaster, CancellationToken ct) =>
         {
             var wi = await db.WorkItems.Include(w => w.Tasks).FirstOrDefaultAsync(w => w.Id == workItemId, ct);
             if (wi is null) return Results.NotFound();
@@ -38,6 +39,7 @@ public static class TriageEndpoints
             }
 
             await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
 
             var dtoList = await db.AgentTasks
                 .Where(t => t.WorkItemId == wi.Id)
@@ -47,7 +49,7 @@ public static class TriageEndpoints
             return Results.Ok(new TriageResultDto(wi.Id, dtoList.Count, dtoList));
         });
 
-        grp.MapPost("/triage/approve", async (Guid workItemId, KaguraDbContext db, CancellationToken ct) =>
+        grp.MapPost("/triage/approve", async (Guid workItemId, KaguraDbContext db, IAgentBroadcaster broadcaster, CancellationToken ct) =>
         {
             var wi = await db.WorkItems.Include(w => w.Tasks).FirstOrDefaultAsync(w => w.Id == workItemId, ct);
             if (wi is null) return Results.NotFound();
@@ -61,10 +63,11 @@ public static class TriageEndpoints
             wi.TriagedAt = DateTime.UtcNow;
             wi.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
             return Results.Ok(new { wi.Id, wi.Status, wi.TriagedAt });
         });
 
-        grp.MapPost("/tasks/{taskId:guid}/approve", async (Guid workItemId, Guid taskId, KaguraDbContext db, CancellationToken ct) =>
+        grp.MapPost("/tasks/{taskId:guid}/approve", async (Guid workItemId, Guid taskId, KaguraDbContext db, IAgentBroadcaster broadcaster, CancellationToken ct) =>
         {
             var wi = await db.WorkItems.Include(w => w.Tasks).FirstOrDefaultAsync(w => w.Id == workItemId, ct);
             if (wi is null) return Results.NotFound();
@@ -86,10 +89,11 @@ public static class TriageEndpoints
             wi.UpdatedAt = now;
 
             await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
             return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
         });
 
-        grp.MapPut("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, UpdateTaskDto dto, KaguraDbContext db) =>
+        grp.MapPut("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, UpdateTaskDto dto, KaguraDbContext db, IAgentBroadcaster broadcaster) =>
         {
             var t = await db.AgentTasks.FirstOrDefaultAsync(x => x.Id == taskId && x.WorkItemId == workItemId);
             if (t is null) return Results.NotFound();
@@ -98,10 +102,11 @@ public static class TriageEndpoints
             t.Order = dto.Order;
             t.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
+            await broadcaster.WorkItemUpdatedAsync(workItemId);
             return Results.Ok(new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath));
         });
 
-        grp.MapPatch("/tasks/{taskId:guid}/status", async (Guid workItemId, Guid taskId, UpdateTaskStatusDto dto, KaguraDbContext db, CancellationToken ct) =>
+        grp.MapPatch("/tasks/{taskId:guid}/status", async (Guid workItemId, Guid taskId, UpdateTaskStatusDto dto, KaguraDbContext db, IAgentBroadcaster broadcaster, CancellationToken ct) =>
         {
             var wi = await db.WorkItems.Include(w => w.Tasks).FirstOrDefaultAsync(w => w.Id == workItemId, ct);
             if (wi is null) return Results.NotFound();
@@ -126,15 +131,17 @@ public static class TriageEndpoints
             wi.UpdatedAt = now;
 
             await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
             return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
         });
 
-        grp.MapDelete("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, KaguraDbContext db) =>
+        grp.MapDelete("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, KaguraDbContext db, IAgentBroadcaster broadcaster) =>
         {
             var t = await db.AgentTasks.FirstOrDefaultAsync(x => x.Id == taskId && x.WorkItemId == workItemId);
             if (t is null) return Results.NotFound();
             db.AgentTasks.Remove(t);
             await db.SaveChangesAsync();
+            await broadcaster.WorkItemUpdatedAsync(workItemId);
             return Results.NoContent();
         });
 

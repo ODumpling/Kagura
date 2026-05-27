@@ -46,6 +46,8 @@ builder.Services.AddSingleton(new AgentRunnerOptions
     MaxConcurrentAgents = devflow.GetValue<int?>("MaxConcurrentAgents") ?? 3,
     ClaudeBinary = devflow["ClaudeBinary"] ?? "claude",
     TranscriptsRoot = devflow["TranscriptsRoot"] ?? "~/.devflow/transcripts",
+    ApiBaseUrl = devflow["ApiBaseUrl"] ?? "http://localhost:5253",
+    PromptTemplate = devflow["PromptTemplate"] ?? AgentRunnerOptions.DefaultPromptTemplate,
 });
 builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
 builder.Services.AddSingleton<IAgentRunner, AgentRunner>();
