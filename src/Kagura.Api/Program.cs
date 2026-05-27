@@ -23,6 +23,7 @@ builder.Services.AddDataProtection()
 
 builder.Services.AddDbContext<KaguraDbContext>(opt => opt.UseSqlite($"Data Source={dbPath}"));
 
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<IIssueProvider, MarkdownIssueProvider>();
 builder.Services.AddSingleton<IIssueProvider, GitHubIssueProvider>();
 builder.Services.AddSingleton<IIssueProvider, AzureDevOpsIssueProvider>();

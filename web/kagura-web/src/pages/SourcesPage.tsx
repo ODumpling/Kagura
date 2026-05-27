@@ -27,7 +27,7 @@ const blankSource = (): UpsertSource => ({
 function defaultConfigFor(type: SourceType): Record<string, unknown> {
   switch (type) {
     case SourceType.Markdown: return { issuesPath: '.devflow/issues' };
-    case SourceType.GitHub: return { owner: '', repo: '', token: '', labels: '' };
+    case SourceType.GitHub: return { url: '', token: '', labels: '' };
     case SourceType.AzureDevOps: return { organization: '', project: '', pat: '', query: '' };
     case SourceType.Beads: return { status: '' };
   }
@@ -77,16 +77,10 @@ function ConfigFields({
     case SourceType.GitHub:
       return (
         <>
-          <div className="grid grid-cols-2 gap-3">
-            <Field id="cfg-owner" label="Owner" hint="User or organisation.">
-              <Input id="cfg-owner" placeholder="anthropics" value={str('owner')}
-                onChange={e => set('owner', e.target.value)} />
-            </Field>
-            <Field id="cfg-repo" label="Repository">
-              <Input id="cfg-repo" placeholder="claude-code" value={str('repo')}
-                onChange={e => set('repo', e.target.value)} />
-            </Field>
-          </div>
+          <Field id="cfg-url" label="Repository URL" hint="e.g. https://github.com/anthropics/claude-code">
+            <Input id="cfg-url" placeholder="https://github.com/anthropics/claude-code" value={str('url')}
+              onChange={e => set('url', e.target.value)} />
+          </Field>
           <Field id="cfg-token" label="Personal access token" hint="Optional. Required for private repos.">
             <Input id="cfg-token" type="password" placeholder="ghp_…" autoComplete="off"
               value={str('token')} onChange={e => set('token', e.target.value)} />

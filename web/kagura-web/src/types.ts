@@ -86,6 +86,16 @@ export interface AgentRunDto {
   exitCode: number | null;
 }
 
+export interface FinishWorkItemResult {
+  id: string;
+  status: WorkItemStatus;
+  branchName: string | null;
+  pullRequestUrl: string | null;
+  merged: number;
+  alreadyMerged: number;
+  pullRequestError: string | null;
+}
+
 export const SourceTypeLabel: Record<SourceType, string> = {
   [SourceType.Markdown]: 'Markdown',
   [SourceType.GitHub]: 'GitHub',
