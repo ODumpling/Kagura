@@ -44,7 +44,7 @@ public static class TriageEndpoints
             var dtoList = await db.AgentTasks
                 .Where(t => t.WorkItemId == wi.Id)
                 .OrderBy(t => t.Order)
-                .Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath))
+                .Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.ReviewNotes))
                 .ToListAsync(ct);
             return Results.Ok(new TriageResultDto(wi.Id, dtoList.Count, dtoList));
         });
@@ -90,7 +90,7 @@ public static class TriageEndpoints
 
             await db.SaveChangesAsync(ct);
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
-            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.ReviewNotes));
         });
 
         grp.MapPut("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, UpdateTaskDto dto, KaguraDbContext db, IAgentBroadcaster broadcaster) =>
@@ -103,7 +103,7 @@ public static class TriageEndpoints
             t.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
             await broadcaster.WorkItemUpdatedAsync(workItemId);
-            return Results.Ok(new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath));
+            return Results.Ok(new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.ReviewNotes));
         });
 
         grp.MapPatch("/tasks/{taskId:guid}/status", async (Guid workItemId, Guid taskId, UpdateTaskStatusDto dto, KaguraDbContext db, IAgentBroadcaster broadcaster, CancellationToken ct) =>
@@ -132,7 +132,7 @@ public static class TriageEndpoints
 
             await db.SaveChangesAsync(ct);
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
-            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.ReviewNotes));
         });
 
         grp.MapDelete("/tasks/{taskId:guid}", async (Guid workItemId, Guid taskId, KaguraDbContext db, IAgentBroadcaster broadcaster) =>

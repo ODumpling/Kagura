@@ -2,6 +2,7 @@ using Kagura.Api.Endpoints;
 using Kagura.Api.Hubs;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
+using Kagura.Core.Review;
 using Kagura.Core.Sources;
 using Kagura.Core.Triage;
 using Kagura.Data;
@@ -37,6 +38,13 @@ builder.Services.Configure<TriageOptions>(opt =>
     opt.Model = builder.Configuration["Triage:Model"];
 });
 builder.Services.AddScoped<ITriageService, ClaudeCliTriageService>();
+
+builder.Services.Configure<ReviewOptions>(opt =>
+{
+    opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+    opt.Model = builder.Configuration["Review:Model"];
+});
+builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
 
 builder.Services.AddSingleton(sp =>
     new GitService(devflow["WorktreesRoot"] ?? "~/.devflow/worktrees",

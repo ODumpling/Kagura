@@ -100,6 +100,15 @@ public partial class GitService
         }
     }
 
+    public async Task<string> DiffTaskAgainstWorkItemAsync(string repoPath, WorkItem wi, AgentTask task, CancellationToken ct = default)
+    {
+        var workItemBranch = WorkItemBranchName(wi);
+        var taskBranch = TaskBranchName(wi, task);
+        var r = await ProcessRunner.RunAsync("git",
+            new[] { "diff", $"{workItemBranch}...{taskBranch}" }, repoPath, ct);
+        return r.Success ? r.Stdout : "";
+    }
+
     public async Task RemoveWorktreeAsync(string repoPath, string worktreePath, CancellationToken ct = default)
     {
         if (!Directory.Exists(worktreePath)) return;

@@ -1,6 +1,6 @@
 import type {
   Source, UpsertSource, WorkItemSummary, WorkItemDetail, AgentTaskDto, AgentRunDto,
-  FinishWorkItemResult,
+  FinishWorkItemResult, AutoReviewResult,
 } from './types';
 
 const API = import.meta.env.VITE_API ?? 'http://localhost:5253';
@@ -49,6 +49,8 @@ export const api = {
       http<AgentTaskDto>('POST', `/api/workitems/${workItemId}/tasks/${taskId}/merge`),
     finish: (id: string) =>
       http<FinishWorkItemResult>('POST', `/api/workitems/${id}/finish`),
+    autoReview: (id: string) =>
+      http<AutoReviewResult>('POST', `/api/workitems/${id}/auto-review`),
   },
 
   agents: {

@@ -68,6 +68,22 @@ export interface AgentTaskDto {
   status: AgentTaskStatus;
   branchName: string | null;
   worktreePath: string | null;
+  reviewNotes: string | null;
+}
+
+export interface AutoReviewItemResult {
+  taskId: string;
+  title: string;
+  autoMerged: boolean;
+  merged: boolean;
+  reasoning: string;
+}
+
+export interface AutoReviewResult {
+  reviewed: number;
+  autoMerged: number;
+  flaggedForHuman: number;
+  items: AutoReviewItemResult[];
 }
 
 export interface WorkItemDetail extends WorkItemSummary {

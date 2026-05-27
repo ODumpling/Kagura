@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play } from 'lucide-react';
+import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch } from 'lucide-react';
 import { api } from '@/api';
 import { getConnection } from '@/signalr';
 import { type AgentRunDto, AgentTaskStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
@@ -137,6 +137,19 @@ export function WorkItemDetailPage() {
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
+  async function autoReview() {
+    if (!item) return;
+    setBusy('auto-review'); setError(null);
+    try {
+      const result = await api.workItems.autoReview(item.id);
+      await reload();
+      if (result.flaggedForHuman > 0 && result.autoMerged === 0) {
+        setError(`Auto-review flagged all ${result.flaggedForHuman} task(s) for human review.`);
+      }
+    }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
   async function mergeTask(taskId: string) {
     setBusy(taskId); setError(null);
     try { await api.workItems.mergeTask(item!.id, taskId); await reload(); setReviewTaskId(null); }
@@ -166,6 +179,7 @@ export function WorkItemDetailPage() {
   const hasProposed = item.tasks.some(t => t.status === AgentTaskStatus.Proposed);
   const hasApproved = item.tasks.some(t => t.status === AgentTaskStatus.Approved);
   const hasRunning = item.tasks.some(t => t.status === AgentTaskStatus.Running);
+  const hasReview = item.tasks.some(t => t.status === AgentTaskStatus.AwaitingReview);
   const reviewable = item.tasks.filter(t => t.status === AgentTaskStatus.AwaitingReview).length;
   const mergedCount = item.tasks.filter(t => t.status === AgentTaskStatus.Merged).length;
   const canFinish = !hasRunning && (reviewable > 0 || mergedCount > 0) && item.status !== WorkItemStatus.PullRequested;
@@ -199,6 +213,12 @@ export function WorkItemDetailPage() {
             <Button onClick={startAll} disabled={busy !== null}>
               {busy === 'start-all' ? <Loader2 className="animate-spin" /> : <Play />}
               {busy === 'start-all' ? 'Queuing…' : 'Start all'}
+            </Button>
+          )}
+          {hasReview && (
+            <Button variant="outline" onClick={autoReview} disabled={busy !== null}>
+              {busy === 'auto-review' ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+              {busy === 'auto-review' ? 'Reviewing…' : 'Auto-review'}
             </Button>
           )}
           {canFinish && (
