@@ -31,6 +31,7 @@ public class WorkItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? TriagedAt { get; set; }
+    public DateTime? ClosedAt { get; set; }
 
     public List<AgentTask> Tasks { get; set; } = new();
 }
