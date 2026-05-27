@@ -2,7 +2,7 @@ import type {
   Source, UpsertSource, WorkItemSummary, WorkItemDetail, AgentTaskDto, AgentRunDto,
 } from './types';
 
-const API = import.meta.env.VITE_API ?? 'http://localhost:5050';
+const API = import.meta.env.VITE_API ?? 'http://localhost:5253';
 
 async function http<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API}${path}`, {

@@ -11,6 +11,8 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 var devflow = builder.Configuration.GetSection("Devflow");
 var dbPath = ResolvePath(devflow["DbPath"] ?? "~/.devflow/kagura.db");
 Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
@@ -69,6 +71,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.MapDefaultEndpoints();
 app.MapGet("/", () => Results.Ok(new { app = "Kagura", status = "ok" }));
 app.MapSourceEndpoints();
 app.MapWorkItemEndpoints();
