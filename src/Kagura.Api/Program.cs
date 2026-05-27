@@ -80,3 +80,5 @@ app.Run();
 
 static string ResolvePath(string path) =>
     path.StartsWith("~/") ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..]) : path;
+
+public partial class Program;
