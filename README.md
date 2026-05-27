@@ -118,13 +118,16 @@ Kagura.sln
 │     ├─ Program.cs                 DI wiring, CORS, migrations, SignalR
 │     ├─ Endpoints/                 Sources, WorkItems, Triage, Agents
 │     └─ Hubs/AgentHub.cs           SignalR: Join/Leave/Input/Resize + SignalRAgentBroadcaster
-└─ web/kagura-web/                  Vite + React + TS
+└─ web/kagura-web/                  Vite + React + TS + Tailwind v4
    ├─ src/
    │  ├─ types.ts                   Mirrors API DTOs/enums
    │  ├─ api.ts                     Typed fetch wrappers
    │  ├─ signalr.ts                 Shared HubConnection singleton + base64 helpers
+   │  ├─ ui.ts                      Shared Tailwind class strings (btn, card, badges)
+   │  ├─ App.css                    Tailwind import + dark-theme body resets
    │  ├─ pages/                     SourcesPage, WorkItemsPage, WorkItemDetailPage
    │  └─ components/AgentTerminal.tsx   xterm.js + FitAddon + SignalR
+   ├─ vite.config.ts                @tailwindcss/vite plugin wired
    └─ tsconfig.app.json             erasableSyntaxOnly disabled (enums used)
 ```
 
