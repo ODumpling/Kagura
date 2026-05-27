@@ -4,6 +4,7 @@ import { Play, Square, Terminal as TerminalIcon, Check, Loader2 } from 'lucide-r
 import { type AgentRunDto, type AgentTaskDto, AgentTaskStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface Column {
   status: AgentTaskStatus;
@@ -32,9 +33,10 @@ interface Props {
   onStop: (taskId: string) => void;
   onOpenTerminal: (taskId: string) => void;
   onOpenTask: (taskId: string) => void;
+  onToggleInclude: (taskId: string, include: boolean) => void;
 }
 
-export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onStop, onOpenTerminal, onOpenTask }: Props) {
+export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onStop, onOpenTerminal, onOpenTask, onToggleInclude }: Props) {
   const [dragOver, setDragOver] = useState<AgentTaskStatus | null>(null);
 
   const visibleColumns = COLUMNS.filter(c => c.alwaysShow || tasks.some(t => t.status === c.status));
@@ -90,6 +92,18 @@ export function TaskKanban({ tasks, runs, busy, onMove, onApprove, onStart, onSt
                   >
                     <div className="text-sm font-medium">{t.order}. {t.title}</div>
                     {t.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-3">{t.description}</p>}
+                    {t.status === AgentTaskStatus.AwaitingReview && (
+                      <label
+                        className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer w-fit"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={t.includeInPullRequest}
+                          onCheckedChange={(v) => onToggleInclude(t.id, v === true)}
+                        />
+                        <span>Include in PR</span>
+                      </label>
+                    )}
                     <div className="flex gap-1 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
                       {t.status === AgentTaskStatus.Proposed && (
                         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onApprove(t.id)} disabled={busy !== null}>
