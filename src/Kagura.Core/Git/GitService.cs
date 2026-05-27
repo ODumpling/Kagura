@@ -124,6 +124,9 @@ public partial class GitService
         return null;
     }
 
+    public static async Task<string> GetDefaultBranchPublicAsync(string repoPath, CancellationToken ct = default)
+        => await GetDefaultBranchAsync(repoPath, ct);
+
     private static async Task<string> GetDefaultBranchAsync(string repoPath, CancellationToken ct)
     {
         var remote = await ProcessRunner.RunAsync("git", new[] { "symbolic-ref", "refs/remotes/origin/HEAD" }, repoPath, ct);
