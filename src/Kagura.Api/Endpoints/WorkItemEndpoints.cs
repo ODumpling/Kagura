@@ -43,7 +43,10 @@ public record AgentTaskDto(
     int Order,
     AgentTaskStatus Status,
     string? BranchName,
-    string? WorktreePath);
+    string? WorktreePath,
+    bool IncludeInPullRequest);
+
+public record UpdateIncludeInPullRequestDto(bool IncludeInPullRequest);
 
 public record FinishWorkItemResultDto(
     Guid Id,
@@ -85,7 +88,7 @@ public static class WorkItemEndpoints
                 w.Id, w.SourceId, w.Source.Name, w.ExternalId, w.Title, w.Body,
                 w.Status, w.Url, w.Labels, w.BranchName, w.PullRequestUrl,
                 w.UpdatedAt, w.TriagedAt,
-                w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath)).ToList()));
+                w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest)).ToList()));
         });
 
         grp.MapPost("/{workItemId:guid}/tasks/{taskId:guid}/merge", async (
@@ -118,7 +121,25 @@ public static class WorkItemEndpoints
             wi.UpdatedAt = now;
             await db.SaveChangesAsync(ct);
 
-            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath));
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest));
+        });
+
+        grp.MapMethods("/{workItemId:guid}/tasks/{taskId:guid}/include", new[] { "PATCH" }, async (
+            Guid workItemId,
+            Guid taskId,
+            UpdateIncludeInPullRequestDto body,
+            KaguraDbContext db,
+            CancellationToken ct) =>
+        {
+            var task = await db.AgentTasks
+                .FirstOrDefaultAsync(t => t.Id == taskId && t.WorkItemId == workItemId, ct);
+            if (task is null) return Results.NotFound();
+
+            task.IncludeInPullRequest = body.IncludeInPullRequest;
+            task.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(new AgentTaskDto(task.Id, task.Title, task.Description, task.Order, task.Status, task.BranchName, task.WorktreePath, task.IncludeInPullRequest));
         });
 
         grp.MapPost("/{id:guid}/finish", async (
