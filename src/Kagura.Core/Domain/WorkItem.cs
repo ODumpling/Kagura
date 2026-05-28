@@ -51,6 +51,7 @@ public class WorkItem
     public List<AgentTask> Tasks { get; set; } = new();
     public List<AgentRun> Runs { get; set; } = new();
     public List<WorkItemComment> Comments { get; set; } = new();
+    public List<AutoReviewInteraction> AutoReviewInteractions { get; set; } = new();
 
     public void MarkClosed(DateTime? now = null)
     {
