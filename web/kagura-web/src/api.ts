@@ -15,8 +15,8 @@ async function http<T>(method: string, path: string, body?: unknown): Promise<T>
     const text = await res.text();
     throw new Error(`${method} ${path} → ${res.status}: ${text}`);
   }
-  if (res.status === 204) return undefined as T;
-  return await res.json();
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {
