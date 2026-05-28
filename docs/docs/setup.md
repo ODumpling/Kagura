@@ -43,14 +43,16 @@ kagura run
 
 Open that URL in your browser — the React UI loads served by the same Kestrel server. On first run, Kagura creates `~/.devflow/` (database, encryption keys, worktrees, transcripts) and prints a one-time banner letting you know.
 
-### Subcommand reference
+### Subcommands
 
-| Command | Notes |
-| --- | --- |
-| `kagura run` | Start the local server. `--port <n>` overrides the default `:5253`. `--verbose` (or `KAGURA_LOG_LEVEL=Debug`) restores the full ASP.NET host logs. `--no-update-check` (or `KAGURA_NO_UPDATE_CHECK=1`) suppresses the daily NuGet version check. |
-| `kagura open` | Open the UI in your default browser. If nothing is running, spawn a server first; honours `--port`. |
-| `kagura doctor` | Diagnose the local install. Non-zero exit if anything fails. |
-| `kagura version` | Print the installed Kagura version and exit. |
+Each subcommand has its own page with the full set of flags, environment
+variables, and behaviour notes:
+
+- [`kagura run`](./commands/run.md) — start the local server.
+- [`kagura open`](./commands/open.md) — open the UI in your browser (spawns
+  a server first if nothing is listening).
+- [`kagura doctor`](./commands/doctor.md) — diagnose the local install.
+- [`kagura version`](./commands/version.md) — print the installed version.
 
 ## Uninstall
 
