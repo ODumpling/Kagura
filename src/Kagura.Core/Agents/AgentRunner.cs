@@ -93,6 +93,7 @@ public interface IAgentRunner
     IReadOnlyCollection<AgentSession> Active { get; }
     Task<AgentSession> StartAsync(WorkItem wi, AgentTask task, string repoPath, CancellationToken ct = default);
     Task StopAsync(Guid runId);
+    Task DismissAsync(Guid runId);
     void MarkExitReason(Guid runId, AgentExitReason reason);
 }
 
@@ -158,9 +159,11 @@ public class AgentRunner : IAgentRunner
 
             var pty = await PtyProvider.SpawnAsync(options, ct);
             var session = new AgentSession(
-                runId, task.Id, wi.Id,
+                runId, task.Id, wi.Id, AgentRunKind.TaskAgent,
                 worktreePath, transcriptPath,
-                pty, _loggerFactory.CreateLogger<AgentSession>());
+                pty, _loggerFactory.CreateLogger<AgentSession>(),
+                title: task.Title,
+                workItemExternalId: wi.ExternalId);
 
             _sessions[runId] = session;
             session.OnData += data => _ = _broadcaster.DataAsync(runId, data);
@@ -183,10 +186,36 @@ public class AgentRunner : IAgentRunner
 
     public async Task StopAsync(Guid runId)
     {
-        if (!_sessions.TryRemove(runId, out var session)) return;
+        // Task agents are removed on stop (their disk transcript persists for replay).
+        // Non-task kinds linger in the registry so their in-memory ring buffer survives
+        // until DismissAsync — the PTY is still killed via DisposeAsync.
+        if (!_sessions.TryGetValue(runId, out var session)) return;
         _exitOverrides.TryAdd(runId, AgentExitReason.KilledByUser);
+
+        if (session.Kind == AgentRunKind.TaskAgent)
+        {
+            if (_sessions.TryRemove(runId, out _))
+            {
+                await session.DisposeAsync();
+                _slots.Release();
+            }
+        }
+        else
+        {
+            await session.DisposeAsync();
+        }
+    }
+
+    public async Task DismissAsync(Guid runId)
+    {
+        if (!_sessions.TryRemove(runId, out var session)) return;
+        if (session.Alive)
+        {
+            // Re-insert so callers can stop first; we don't kill via Dismiss.
+            _sessions[runId] = session;
+            throw new InvalidOperationException("Cannot dismiss a live session; stop it first.");
+        }
         await session.DisposeAsync();
-        _slots.Release();
     }
 
     public void MarkExitReason(Guid runId, AgentExitReason reason)
@@ -211,7 +240,13 @@ public class AgentRunner : IAgentRunner
 
     private void Cleanup(Guid runId)
     {
-        if (_sessions.TryRemove(runId, out var session))
+        if (!_sessions.TryGetValue(runId, out var session)) return;
+
+        // Non-task-agent kinds linger in the registry after exit so their ring buffer is
+        // available for replay until DismissAsync removes them.
+        if (session.Kind != AgentRunKind.TaskAgent) return;
+
+        if (_sessions.TryRemove(runId, out session))
         {
             _ = session.DisposeAsync().AsTask();
             _slots.Release();

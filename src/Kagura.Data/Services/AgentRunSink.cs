@@ -56,7 +56,6 @@ public sealed class AgentRunSink : IAgentRunSink
 
         await _db.SaveChangesAsync(ct);
 
-        if (run.AgentTask is not null)
-            await _broadcaster.WorkItemUpdatedAsync(run.AgentTask.WorkItemId);
+        await _broadcaster.WorkItemUpdatedAsync(run.WorkItemId);
     }
 }

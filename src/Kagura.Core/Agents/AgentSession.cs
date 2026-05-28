@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+using Kagura.Core.Domain;
 using Microsoft.Extensions.Logging;
 using Porta.Pty;
 
@@ -9,6 +9,9 @@ public sealed class AgentSession : IAsyncDisposable
     public Guid RunId { get; }
     public Guid TaskId { get; }
     public Guid WorkItemId { get; }
+    public AgentRunKind Kind { get; }
+    public string Title { get; }
+    public string WorkItemExternalId { get; }
     public string WorktreePath { get; }
     public string TranscriptLogPath { get; }
     public int ProcessId { get; }
@@ -16,12 +19,14 @@ public sealed class AgentSession : IAsyncDisposable
     public DateTime? EndedAt { get; private set; }
     public int? ExitCode { get; private set; }
     public bool Alive => !EndedAt.HasValue;
+    public bool AcceptsInput => Kind == AgentRunKind.TaskAgent && Alive;
 
     public event Action<byte[]>? OnData;
     public event Action<int?>? OnExit;
 
     private readonly IPtyConnection _pty;
-    private readonly FileStream _transcript;
+    private readonly FileStream? _transcript;
+    private readonly RingBuffer? _ringBuffer;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _readLoop;
     private readonly ILogger _log;
@@ -30,22 +35,35 @@ public sealed class AgentSession : IAsyncDisposable
         Guid runId,
         Guid taskId,
         Guid workItemId,
+        AgentRunKind kind,
         string worktreePath,
         string transcriptLogPath,
         IPtyConnection pty,
-        ILogger log)
+        ILogger log,
+        string title = "",
+        string workItemExternalId = "")
     {
         RunId = runId;
         TaskId = taskId;
         WorkItemId = workItemId;
+        Kind = kind;
+        Title = title;
+        WorkItemExternalId = workItemExternalId;
         WorktreePath = worktreePath;
         TranscriptLogPath = transcriptLogPath;
         ProcessId = pty.Pid;
         _pty = pty;
         _log = log;
 
-        Directory.CreateDirectory(Path.GetDirectoryName(transcriptLogPath)!);
-        _transcript = new FileStream(transcriptLogPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+        if (kind == AgentRunKind.TaskAgent)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(transcriptLogPath)!);
+            _transcript = new FileStream(transcriptLogPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+        }
+        else
+        {
+            _ringBuffer = new RingBuffer();
+        }
 
         _pty.ProcessExited += (_, e) =>
         {
@@ -69,8 +87,12 @@ public sealed class AgentSession : IAsyncDisposable
                 if (n == 0) break;
                 var chunk = new byte[n];
                 Array.Copy(buf, chunk, n);
-                await _transcript.WriteAsync(chunk.AsMemory(), _cts.Token);
-                await _transcript.FlushAsync(_cts.Token);
+                if (_transcript is not null)
+                {
+                    await _transcript.WriteAsync(chunk.AsMemory(), _cts.Token);
+                    await _transcript.FlushAsync(_cts.Token);
+                }
+                _ringBuffer?.Write(chunk);
                 OnData?.Invoke(chunk);
             }
         }
@@ -87,7 +109,7 @@ public sealed class AgentSession : IAsyncDisposable
 
     public async ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
     {
-        if (!Alive) return;
+        if (!AcceptsInput) return;
         await _pty.WriterStream.WriteAsync(data, ct);
         await _pty.WriterStream.FlushAsync(ct);
     }
@@ -99,6 +121,8 @@ public sealed class AgentSession : IAsyncDisposable
 
     public byte[] ReadTranscript()
     {
+        if (_ringBuffer is not null)
+            return _ringBuffer.Snapshot();
         try { return File.ReadAllBytes(TranscriptLogPath); }
         catch { return Array.Empty<byte>(); }
     }
@@ -108,7 +132,8 @@ public sealed class AgentSession : IAsyncDisposable
         _cts.Cancel();
         try { _pty.Dispose(); } catch { }
         try { await _readLoop; } catch { }
-        await _transcript.DisposeAsync();
+        if (_transcript is not null)
+            await _transcript.DisposeAsync();
         _cts.Dispose();
     }
 }

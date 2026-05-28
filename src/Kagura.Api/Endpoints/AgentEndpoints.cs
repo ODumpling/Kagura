@@ -11,6 +11,9 @@ public record AgentRunDto(
     Guid RunId,
     Guid TaskId,
     Guid WorkItemId,
+    AgentRunKind Kind,
+    string Title,
+    string WorkItemExternalId,
     string WorktreePath,
     int ProcessId,
     DateTime StartedAt,
@@ -78,6 +81,17 @@ public static class AgentEndpoints
             }
 
             return Results.Accepted(value: new { queued = taskIds.Count });
+        });
+
+        // Releases the in-memory session (and its ring buffer for non-task kinds). Refuses
+        // while the session is still live; caller must Stop first.
+        grp.MapPost("/{runId:guid}/dismiss", async (Guid runId, IAgentRunner runner) =>
+        {
+            var session = runner.Get(runId);
+            if (session is null) return Results.NotFound();
+            if (session.Alive) return Results.BadRequest(new { error = "Session is still running. Stop it before dismissing." });
+            await runner.DismissAsync(runId);
+            return Results.NoContent();
         });
 
         grp.MapPost("/{runId:guid}/stop", async (Guid runId, IAgentRunner runner, KaguraDbContext db, IAgentBroadcaster broadcaster, CancellationToken ct) =>
@@ -168,8 +182,8 @@ public static class AgentEndpoints
     }
 
     private static AgentRunDto ToDto(AgentSession s) => new(
-        s.RunId, s.TaskId, s.WorkItemId, s.WorktreePath, s.ProcessId,
-        s.StartedAt, s.Alive, s.ExitCode);
+        s.RunId, s.TaskId, s.WorkItemId, s.Kind, s.Title, s.WorkItemExternalId,
+        s.WorktreePath, s.ProcessId, s.StartedAt, s.Alive, s.ExitCode);
 
     private static async Task<(AgentSession? session, string? error)> StartTaskAsync(
         KaguraDbContext db,
@@ -198,6 +212,8 @@ public static class AgentEndpoints
         {
             Id = session.RunId,
             AgentTaskId = task.Id,
+            WorkItemId = task.WorkItemId,
+            Kind = AgentRunKind.TaskAgent,
             Status = AgentRunStatus.Running,
             ProcessId = session.ProcessId,
             TranscriptLogPath = session.TranscriptLogPath,

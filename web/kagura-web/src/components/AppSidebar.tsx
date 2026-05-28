@@ -1,5 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { FileText, GitMerge, GitBranch, FolderGit2, ListTodo, RefreshCw, Plus, Settings } from 'lucide-react';
+import { FileText, GitMerge, GitBranch, FolderGit2, ListTodo, RefreshCw, Plus, Settings, Bot } from 'lucide-react';
+import { useAgentSessions } from '@/contexts/AgentSessionsContext';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarSeparator,
@@ -19,6 +20,7 @@ const sourceIcons: Record<SourceType, typeof FileText> = {
 
 export function AppSidebar() {
   const { sources, refresh } = useSources();
+  const { active } = useAgentSessions();
   const location = useLocation();
   const [syncing, setSyncing] = useState(false);
 
@@ -50,6 +52,21 @@ export function AppSidebar() {
                     <SidebarMenuButton isActive={isActive} tooltip="All work items">
                       <ListTodo />
                       <span>Work items</span>
+                    </SidebarMenuButton>
+                  )}
+                </NavLink>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <NavLink to="/agents">
+                  {({ isActive }) => (
+                    <SidebarMenuButton isActive={isActive} tooltip="Agent sessions">
+                      <Bot />
+                      <span>Agents</span>
+                      {active.length > 0 && (
+                        <span className="ml-auto rounded-full bg-primary text-primary-foreground text-[10px] px-1.5 py-0.5 leading-none group-data-[collapsible=icon]:hidden">
+                          {active.length}
+                        </span>
+                      )}
                     </SidebarMenuButton>
                   )}
                 </NavLink>

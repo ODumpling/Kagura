@@ -14,6 +14,7 @@ internal sealed class StubAgentRunner : IAgentRunner
     public Task<AgentSession> StartAsync(WorkItem wi, AgentTask task, string repoPath, CancellationToken ct = default) =>
         throw new InvalidOperationException("StartAsync was unexpectedly invoked in this test.");
     public Task StopAsync(Guid runId) => Task.CompletedTask;
+    public Task DismissAsync(Guid runId) => Task.CompletedTask;
     public void MarkExitReason(Guid runId, AgentExitReason reason) { }
 }
 
@@ -52,6 +53,8 @@ public class RalphLoopDriverTests
         var run = new AgentRun
         {
             AgentTaskId = task.Id,
+            WorkItemId = wi.Id,
+            Kind = AgentRunKind.TaskAgent,
             Status = AgentRunStatus.Crashed,
             StartedAt = DateTime.UtcNow.AddMinutes(-1),
             EndedAt = DateTime.UtcNow,
@@ -114,6 +117,8 @@ public class RalphLoopDriverTests
         var run = new AgentRun
         {
             AgentTaskId = task.Id,
+            WorkItemId = wi.Id,
+            Kind = AgentRunKind.TaskAgent,
             Status = AgentRunStatus.Crashed,
             StartedAt = DateTime.UtcNow.AddMinutes(-1),
             EndedAt = DateTime.UtcNow,

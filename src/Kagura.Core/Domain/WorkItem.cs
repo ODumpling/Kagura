@@ -38,6 +38,8 @@ public class WorkItem
     public bool RalphLoopActive { get; set; }
     public string? RalphLoopHaltReason { get; set; }
 
+    public string? LastTriageError { get; set; }
+
     public GrillStatus GrillStatus { get; set; } = GrillStatus.None;
     public string? OriginalBody { get; set; }
 
@@ -47,6 +49,7 @@ public class WorkItem
     public DateTime? ClosedAt { get; set; }
 
     public List<AgentTask> Tasks { get; set; } = new();
+    public List<AgentRun> Runs { get; set; } = new();
     public List<WorkItemComment> Comments { get; set; } = new();
 
     public void MarkClosed(DateTime? now = null)

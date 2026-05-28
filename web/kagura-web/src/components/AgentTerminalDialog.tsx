@@ -1,5 +1,5 @@
 import { Square, Loader2 } from 'lucide-react';
-import { type AgentRunDto, type AgentTaskDto } from '@/types';
+import { AgentRunKind, AgentRunKindLabel, type AgentRunDto } from '@/types';
 import {
   Dialog,
   DialogContent,
@@ -11,37 +11,36 @@ import { Button } from '@/components/ui/button';
 import { AgentTerminal } from '@/components/AgentTerminal';
 
 interface Props {
-  task: AgentTaskDto | null;
   run: AgentRunDto | null;
-  busy: string | null;
+  busy: boolean;
   onClose: () => void;
-  onStop: (taskId: string) => void;
+  onStop?: (runId: string) => void;
 }
 
-export function AgentTerminalDialog({ task, run, busy, onClose, onStop }: Props) {
-  const open = task !== null && run !== null;
-  const taskBusy = task !== null && busy === task.id;
+export function AgentTerminalDialog({ run, busy, onClose, onStop }: Props) {
+  const open = run !== null;
+  const canStop = run?.alive && run.kind === AgentRunKind.TaskAgent && onStop !== undefined;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-none w-[75vw] h-[75vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle>
-            {task ? `${task.order}. ${task.title}` : 'Agent terminal'}
+            {run ? `${AgentRunKindLabel[run.kind]} — ${run.title || run.runId.slice(0, 8)}` : 'Agent terminal'}
           </DialogTitle>
         </DialogHeader>
         {run && (
-          <AgentTerminal key={run.runId} runId={run.runId} className="flex-1 min-h-0" />
+          <AgentTerminal key={run.runId} run={run} className="flex-1 min-h-0" />
         )}
         <DialogFooter className="shrink-0">
-          {task && (
+          {canStop && (
             <Button
               variant="ghost"
               className="text-destructive"
-              onClick={() => onStop(task.id)}
-              disabled={taskBusy}
+              onClick={() => onStop?.(run!.runId)}
+              disabled={busy}
             >
-              {taskBusy ? <Loader2 className="animate-spin" /> : <Square />}
+              {busy ? <Loader2 className="animate-spin" /> : <Square />}
               Stop
             </Button>
           )}
