@@ -80,6 +80,17 @@ public static class AgentEndpoints
             return Results.Accepted(value: new { queued = taskIds.Count });
         });
 
+        // Releases the in-memory session (and its ring buffer for non-task kinds). Refuses
+        // while the session is still live; caller must Stop first.
+        grp.MapPost("/{runId:guid}/dismiss", async (Guid runId, IAgentRunner runner) =>
+        {
+            var session = runner.Get(runId);
+            if (session is null) return Results.NotFound();
+            if (session.Alive) return Results.BadRequest(new { error = "Session is still running. Stop it before dismissing." });
+            await runner.DismissAsync(runId);
+            return Results.NoContent();
+        });
+
         grp.MapPost("/{runId:guid}/stop", async (Guid runId, IAgentRunner runner, KaguraDbContext db, IAgentBroadcaster broadcaster, CancellationToken ct) =>
         {
             await runner.StopAsync(runId);
