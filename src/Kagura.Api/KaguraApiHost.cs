@@ -9,6 +9,8 @@ using Kagura.Core.Sources;
 using Kagura.Core.Triage;
 using Kagura.Data;
 using Kagura.Data.Services;
+using System.Reflection;
+using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -60,7 +62,17 @@ public static class KaguraApiHost
 
         var devflow = builder.Configuration.GetSection("Devflow");
         var dbPath = ResolvePath(devflow["DbPath"] ?? "~/.devflow/kagura.db");
-        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+        var stateDir = Path.GetDirectoryName(dbPath)!;
+        var firstRun = !Directory.Exists(stateDir);
+        if (firstRun)
+        {
+            // One-time creation banner — printed before the "Kagura running at" line below.
+            Console.WriteLine($"Creating {DisplayPath(stateDir)} (database, keys, worktrees)");
+        }
+        Directory.CreateDirectory(stateDir);
+        Directory.CreateDirectory(Path.Combine(stateDir, "keys"));
+        Directory.CreateDirectory(Path.Combine(stateDir, "worktrees"));
+        Directory.CreateDirectory(Path.Combine(stateDir, "transcripts"));
 
         builder.Services.AddDataProtection()
             .SetApplicationName("Kagura")
@@ -146,7 +158,21 @@ public static class KaguraApiHost
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
+
+            // In the Testing environment, the WebApplicationFactory swaps the DbContext for an
+            // in-memory SQLite connection; backing up the real on-disk DB is meaningless and
+            // would race across parallel test fixtures.
+            if (!app.Environment.IsEnvironment("Testing"))
+            {
+                BackupBeforeMigrate(stateDir, dbPath, db);
+            }
+
             db.Database.Migrate();
+
+            if (!app.Environment.IsEnvironment("Testing"))
+            {
+                WriteStateFile(stateDir);
+            }
         }
 
         if (app.Environment.IsDevelopment())
@@ -214,4 +240,122 @@ public static class KaguraApiHost
         path.StartsWith("~/", StringComparison.Ordinal)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
             : path;
+
+    private static string DisplayPath(string path)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return path.StartsWith(home, StringComparison.Ordinal)
+            ? "~" + path[home.Length..]
+            : path;
+    }
+
+    private record StateFile(string LastVersion);
+
+    private static StateFile? ReadStateFile(string stateDir)
+    {
+        var path = Path.Combine(stateDir, "state.json");
+        if (!File.Exists(path)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<StateFile>(File.ReadAllText(path));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void WriteStateFile(string stateDir)
+    {
+        var path = Path.Combine(stateDir, "state.json");
+        var version = GetInformationalVersion();
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(new StateFile(version)));
+        }
+        catch
+        {
+            // Best-effort: state.json is only used to name future backups; running without it is fine.
+        }
+    }
+
+    private static string GetInformationalVersion()
+    {
+        var raw = typeof(KaguraApiHost).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? "0.0.0";
+        var plus = raw.IndexOf('+');
+        return plus >= 0 ? raw[..plus] : raw;
+    }
+
+    /// <summary>
+    /// If <paramref name="dbPath"/> exists and the EF Core context reports pending migrations,
+    /// copy the database to <c>kagura.db.bak-{oldVersion}</c> in <paramref name="stateDir"/>
+    /// before letting the caller apply the migrations. Older backups are pruned so only the
+    /// 3 most recent remain. If the backup itself fails, the exception is propagated and the
+    /// caller skips migration — better to crash visibly than silently corrupt the DB.
+    /// </summary>
+    private static void BackupBeforeMigrate(string stateDir, string dbPath, KaguraDbContext db)
+    {
+        if (!File.Exists(dbPath))
+        {
+            return;
+        }
+
+        List<string> pending;
+        try
+        {
+            pending = db.Database.GetPendingMigrations().ToList();
+        }
+        catch
+        {
+            // If we can't even enumerate pending migrations, let Migrate() surface the error.
+            return;
+        }
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        var oldVersion = ReadStateFile(stateDir)?.LastVersion ?? "unknown";
+        var safeVersion = SanitizeForFilename(oldVersion);
+        var backupPath = Path.Combine(stateDir, $"kagura.db.bak-{safeVersion}");
+
+        // If a backup at this name already exists (same version, prior failed attempt) keep
+        // the older one — it's the more pristine pre-migration snapshot.
+        try
+        {
+            if (!File.Exists(backupPath))
+            {
+                File.Copy(dbPath, backupPath);
+            }
+        }
+        catch (IOException)
+        {
+            // Best-effort: if the backup itself fails we'd rather start with an unbackuped DB
+            // than refuse to boot. Migration may still succeed.
+            return;
+        }
+
+        PruneBackups(stateDir, keep: 3);
+    }
+
+    private static void PruneBackups(string stateDir, int keep)
+    {
+        var backups = Directory.EnumerateFiles(stateDir, "kagura.db.bak-*")
+            .Select(p => new FileInfo(p))
+            .OrderByDescending(f => f.LastWriteTimeUtc)
+            .ToList();
+        foreach (var old in backups.Skip(keep))
+        {
+            try { old.Delete(); } catch { /* best effort */ }
+        }
+    }
+
+    private static string SanitizeForFilename(string s)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = s.Select(c => invalid.Contains(c) ? '_' : c).ToArray();
+        return new string(chars);
+    }
 }
