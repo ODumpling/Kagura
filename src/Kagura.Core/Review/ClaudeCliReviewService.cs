@@ -1,7 +1,6 @@
-using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Kagura.Core.ClaudeCli;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -69,50 +68,28 @@ public class ClaudeCliReviewService : IReviewService
              ```
              """;
 
-        var psi = new ProcessStartInfo
+        var args = new List<string>
         {
-            FileName = _options.ClaudeBinary,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
+            "-p", userPrompt,
+            "--append-system-prompt", SystemPrompt,
+            "--output-format", "stream-json",
+            "--verbose",
         };
-        psi.ArgumentList.Add("-p");
-        psi.ArgumentList.Add(userPrompt);
-        psi.ArgumentList.Add("--append-system-prompt");
-        psi.ArgumentList.Add(SystemPrompt);
-        psi.ArgumentList.Add("--output-format");
-        psi.ArgumentList.Add("json");
         if (!string.IsNullOrWhiteSpace(_options.Model))
         {
-            psi.ArgumentList.Add("--model");
-            psi.ArgumentList.Add(_options.Model);
+            args.Add("--model");
+            args.Add(_options.Model);
         }
 
-        using var process = new Process { StartInfo = psi };
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+        var result = await ClaudeCliPtyRunner.RunAsync(_options.ClaudeBinary, args, ct: ct);
 
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        await using var _ = ct.Register(() =>
-        {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-        });
-
-        await process.WaitForExitAsync(ct);
-
-        if (process.ExitCode != 0)
+        if (result.ExitCode != 0)
             throw new InvalidOperationException(
-                $"claude CLI exited with code {process.ExitCode}. stderr: {stderr.ToString().Trim()}");
+                $"claude CLI exited with code {result.ExitCode}. stdout: {result.Stdout.Trim()}");
 
-        var envelope = JsonSerializer.Deserialize<ClaudeCliResult>(stdout.ToString(), JsonOpts)
-            ?? throw new InvalidOperationException($"Could not parse claude CLI JSON envelope. stdout: {stdout}");
+        var envelopeJson = ClaudeCliPtyRunner.ExtractResultEnvelope(result.Stdout);
+        var envelope = JsonSerializer.Deserialize<ClaudeCliResult>(envelopeJson, JsonOpts)
+            ?? throw new InvalidOperationException($"Could not parse claude CLI JSON envelope. line: {envelopeJson}");
 
         if (envelope.IsError || string.IsNullOrWhiteSpace(envelope.Result))
             throw new InvalidOperationException(
