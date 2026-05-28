@@ -1,6 +1,7 @@
 import type {
   Source, UpsertSource, WorkItemSummary, WorkItemDetail, AgentTaskDto, AgentRunDto,
   FinishWorkItemResult, WorkItemPreview, AutoReviewResult,
+  GrillState, WorkItemComment, FinalizeGrillResult,
 } from './types';
 
 const API = import.meta.env.VITE_API ?? 'http://localhost:5253';
@@ -68,6 +69,19 @@ export const api = {
       http<void>('POST', `/api/workitems/${id}/ralph-loop`),
     ralphLoopCancel: (id: string) =>
       http<void>('POST', `/api/workitems/${id}/ralph-loop/cancel`),
+  },
+
+  grill: {
+    get: (workItemId: string) =>
+      http<GrillState>('GET', `/api/workitems/${workItemId}/grill`),
+    start: (workItemId: string) =>
+      http<WorkItemComment>('POST', `/api/workitems/${workItemId}/grill/start`),
+    postComment: (workItemId: string, content: string) =>
+      http<WorkItemComment[]>('POST', `/api/workitems/${workItemId}/grill/comments`, { content }),
+    finalize: (workItemId: string) =>
+      http<FinalizeGrillResult>('POST', `/api/workitems/${workItemId}/grill/finalize`),
+    reset: (workItemId: string) =>
+      http<void>('POST', `/api/workitems/${workItemId}/grill/reset`),
   },
 
   agents: {
