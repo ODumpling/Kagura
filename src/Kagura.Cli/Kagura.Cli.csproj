@@ -18,6 +18,10 @@
     <RepositoryUrl>https://github.com/ODumpling/Kagura</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
 
+    <!-- MinVer: versions come from git tags (e.g. `v0.1.0` → `0.1.0`). -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+
     <!--
       RunNpmBuild=true tells the BuildKaguraWeb target below to run `npm ci && npm run build`
       against ../../web/kagura-web before the rest of the project builds. The release workflow
@@ -33,6 +37,10 @@
   <ItemGroup>
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.0" />
+    <PackageReference Include="MinVer" Version="5.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>

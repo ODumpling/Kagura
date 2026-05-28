@@ -13,6 +13,13 @@ runCommand.SetHandler(async () =>
 });
 root.AddCommand(runCommand);
 
+var versionCommand = new Command("version", "Print the installed Kagura version.");
+versionCommand.SetHandler(() =>
+{
+    Console.WriteLine(GetInformationalVersion());
+});
+root.AddCommand(versionCommand);
+
 return await root.InvokeAsync(args);
 
 static IFileProvider? TryCreateEmbeddedSpaProvider()
@@ -28,4 +35,17 @@ static IFileProvider? TryCreateEmbeddedSpaProvider()
     }
 
     return new ManifestEmbeddedFileProvider(assembly, "wwwroot");
+}
+
+static string GetInformationalVersion()
+{
+    var attr = Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+
+    var raw = attr?.InformationalVersion ?? "0.0.0";
+
+    // MinVer's AssemblyInformationalVersion can include a `+<sha>` build metadata suffix —
+    // strip it so `kagura version` prints a clean semver.
+    var plus = raw.IndexOf('+');
+    return plus >= 0 ? raw[..plus] : raw;
 }
