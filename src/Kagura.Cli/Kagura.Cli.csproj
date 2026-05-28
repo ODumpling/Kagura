@@ -1,0 +1,78 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Kagura.Cli</RootNamespace>
+    <OutputType>Exe</OutputType>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>kagura</ToolCommandName>
+    <PackageId>Kagura.Cli</PackageId>
+    <Authors>Kagura contributors</Authors>
+    <Description>Kagura: a self-hosted dev-flow assistant. Installs as a global tool: `dotnet tool install -g Kagura.Cli`, then run `kagura run` to launch the local server.</Description>
+    <PackageTags>kagura;devflow;cli;claude;dotnet-tool</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/ODumpling/Kagura</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ODumpling/Kagura</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+    <!--
+      RunNpmBuild=true tells the BuildKaguraWeb target below to run `npm ci && npm run build`
+      against ../../web/kagura-web before the rest of the project builds. The release workflow
+      can instead build the SPA in a separate step and pass RunNpmBuild=false (or just omit it).
+      Default: false, so `dotnet build` / `dotnet test` stay fast.
+    -->
+    <RunNpmBuild Condition="'$(RunNpmBuild)' == ''">false</RunNpmBuild>
+    <WebRoot>$(MSBuildThisFileDirectory)..\..\web\kagura-web</WebRoot>
+    <WebDist>$(WebRoot)\dist</WebDist>
+    <GenerateEmbeddedFilesManifest Condition="Exists('$(WebDist)\index.html')">true</GenerateEmbeddedFilesManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kagura.Api\Kagura.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!--
+    SPA embedding. The static ItemGroup is gated on dist/index.html existing at project-load time:
+      • If you've already built the SPA (or just ran the dev flow), dist/ is populated and the
+        glob picks it up automatically.
+      • If you haven't, set RunNpmBuild=true (or run `npm ci && npm run build` in web/kagura-web
+        beforehand) and re-invoke MSBuild — the BuildKaguraWeb target below produces the dist tree.
+    The release workflow runs npm in a separate CI step before invoking `dotnet pack`.
+  -->
+  <ItemGroup Condition="Exists('$(WebDist)\index.html')">
+    <EmbeddedResource Include="$(WebDist)\**\*.*">
+      <Link>wwwroot/$([System.String]::Copy('%(RecursiveDir)').Replace('\','/'))%(Filename)%(Extension)</Link>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!--
+    Local convenience target: builds the SPA when RunNpmBuild=true and dist/ is missing.
+    Because EmbeddedResource is a static glob (evaluated at project load), running the SPA
+    build mid-MSBuild does not retroactively embed the dist files in *this* invocation.
+    For a clean pack the recommended sequence is:
+      (cd web/kagura-web && npm ci && npm run build) && dotnet pack src/Kagura.Cli -c Release -o ./nupkgs
+    The release workflow follows that order. This target exists so a fresh `RunNpmBuild=true`
+    invocation populates dist/ for the *next* build, rather than silently shipping an empty UI.
+  -->
+  <Target Name="BuildKaguraWeb"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(RunNpmBuild)' == 'true' and !Exists('$(WebDist)\index.html')">
+    <Message Importance="high" Text="Kagura.Cli: building React SPA at $(WebRoot)..." />
+    <Exec Command="npm ci" WorkingDirectory="$(WebRoot)" />
+    <Exec Command="npm run build" WorkingDirectory="$(WebRoot)" />
+    <Warning Text="The SPA was built mid-MSBuild — the static EmbeddedResource glob has already been evaluated, so the dist files are not in this assembly. Re-run the build to embed them." />
+  </Target>
+
+</Project>
