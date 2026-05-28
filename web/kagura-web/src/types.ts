@@ -122,16 +122,31 @@ export interface WorkItemDetail extends WorkItemSummary {
   tasks: AgentTaskDto[];
 }
 
+export enum AgentRunKind {
+  TaskAgent = 0,
+  Triage = 1,
+  AutoReview = 2,
+}
+
 export interface AgentRunDto {
   runId: string;
   taskId: string;
   workItemId: string;
+  kind: AgentRunKind;
+  title: string;
+  workItemExternalId: string;
   worktreePath: string;
   processId: number;
   startedAt: string;
   alive: boolean;
   exitCode: number | null;
 }
+
+export const AgentRunKindLabel: Record<AgentRunKind, string> = {
+  [AgentRunKind.TaskAgent]: 'Agent',
+  [AgentRunKind.Triage]: 'Triage',
+  [AgentRunKind.AutoReview]: 'Review',
+};
 
 export interface FinishWorkItemResult {
   id: string;

@@ -11,6 +11,9 @@ public record AgentRunDto(
     Guid RunId,
     Guid TaskId,
     Guid WorkItemId,
+    AgentRunKind Kind,
+    string Title,
+    string WorkItemExternalId,
     string WorktreePath,
     int ProcessId,
     DateTime StartedAt,
@@ -179,8 +182,8 @@ public static class AgentEndpoints
     }
 
     private static AgentRunDto ToDto(AgentSession s) => new(
-        s.RunId, s.TaskId, s.WorkItemId, s.WorktreePath, s.ProcessId,
-        s.StartedAt, s.Alive, s.ExitCode);
+        s.RunId, s.TaskId, s.WorkItemId, s.Kind, s.Title, s.WorkItemExternalId,
+        s.WorktreePath, s.ProcessId, s.StartedAt, s.Alive, s.ExitCode);
 
     private static async Task<(AgentSession? session, string? error)> StartTaskAsync(
         KaguraDbContext db,

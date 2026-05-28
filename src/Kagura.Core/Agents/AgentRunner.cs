@@ -161,7 +161,9 @@ public class AgentRunner : IAgentRunner
             var session = new AgentSession(
                 runId, task.Id, wi.Id, AgentRunKind.TaskAgent,
                 worktreePath, transcriptPath,
-                pty, _loggerFactory.CreateLogger<AgentSession>());
+                pty, _loggerFactory.CreateLogger<AgentSession>(),
+                title: task.Title,
+                workItemExternalId: wi.ExternalId);
 
             _sessions[runId] = session;
             session.OnData += data => _ = _broadcaster.DataAsync(runId, data);
