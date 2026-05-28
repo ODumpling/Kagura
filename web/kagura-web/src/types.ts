@@ -135,6 +135,30 @@ export interface WorkItemPreview {
   stats: PreviewStats;
 }
 
+export interface ReviewPromptOption {
+  id: string;
+  label: string;
+  description: string | null;
+}
+
+export interface ReviewPrompt {
+  id: string;
+  workItemId: string;
+  taskId: string | null;
+  runId: string | null;
+  question: string;
+  options: ReviewPromptOption[];
+  createdAt: string;
+}
+
+export interface ReviewPromptResponse {
+  promptId: string;
+  workItemId: string;
+  selectedOptionId: string;
+  notes: string | null;
+  answeredAt: string;
+}
+
 export interface AutoReviewItemResult {
   taskId: string;
   title: string;

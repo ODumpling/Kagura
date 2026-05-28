@@ -6,6 +6,7 @@ import { getConnection } from '@/signalr';
 import { type AgentRunDto, AgentRunKind, AgentTaskStatus, GrillStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
 import { useAgentSessions } from '@/contexts/AgentSessionsContext';
 import { AgentTerminalDialog } from '@/components/AgentTerminalDialog';
+import { AutoReviewPromptPanel } from '@/components/AutoReviewPromptPanel';
 import { GrillPanel } from '@/components/GrillPanel';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -418,6 +419,8 @@ export function WorkItemDetailPage() {
           <span className="text-muted-foreground text-xs">attempt {ralphCurrent.attempt}/3</span>
         </div>
       )}
+
+      <AutoReviewPromptPanel workItemId={item.id} />
 
       {!ralphActive && item.ralphLoopHaltReason && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm flex items-start gap-2">

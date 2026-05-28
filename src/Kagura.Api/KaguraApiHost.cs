@@ -102,6 +102,8 @@ public static class KaguraApiHost
             opt.Model = builder.Configuration["Review:Model"];
         });
         builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
+        builder.Services.AddSingleton<IReviewPromptCoordinator, InMemoryReviewPromptCoordinator>();
+        builder.Services.AddHostedService<ReviewPromptBroadcaster>();
 
         builder.Services.Configure<GrillOptions>(opt =>
         {
@@ -195,6 +197,7 @@ public static class KaguraApiHost
         app.MapTriageEndpoints();
         app.MapGrillEndpoints();
         app.MapAgentEndpoints();
+        app.MapReviewPromptEndpoints();
         app.MapHub<AgentHub>("/hubs/agent");
 
         // Dedicated identification probe used by `kagura stop` to verify the listener
