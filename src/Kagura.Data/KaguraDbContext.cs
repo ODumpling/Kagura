@@ -54,7 +54,8 @@ public class KaguraDbContext : DbContext
         mb.Entity<AgentRun>(e =>
         {
             e.HasKey(x => x.Id);
-            e.HasOne(x => x.AgentTask).WithMany(x => x.Runs).HasForeignKey(x => x.AgentTaskId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.AgentTask).WithMany(x => x.Runs).HasForeignKey(x => x.AgentTaskId).OnDelete(DeleteBehavior.Cascade).IsRequired(false);
+            e.HasOne(x => x.WorkItem).WithMany().HasForeignKey(x => x.WorkItemId).OnDelete(DeleteBehavior.Cascade).IsRequired(false);
         });
     }
 }

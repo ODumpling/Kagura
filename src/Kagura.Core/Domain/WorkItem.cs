@@ -31,6 +31,8 @@ public class WorkItem
     public bool RalphLoopActive { get; set; }
     public string? RalphLoopHaltReason { get; set; }
 
+    public string? LastTriageError { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? TriagedAt { get; set; }

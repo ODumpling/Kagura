@@ -9,11 +9,24 @@ public enum AgentRunStatus
     Crashed = 4,
 }
 
+public enum AgentRunKind
+{
+    TaskAgent = 0,
+    Triage = 1,
+    AutoReview = 2,
+}
+
 public class AgentRun
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid AgentTaskId { get; set; }
-    public AgentTask AgentTask { get; set; } = null!;
+
+    public AgentRunKind Kind { get; set; } = AgentRunKind.TaskAgent;
+
+    public Guid? AgentTaskId { get; set; }
+    public AgentTask? AgentTask { get; set; }
+
+    public Guid? WorkItemId { get; set; }
+    public WorkItem? WorkItem { get; set; }
 
     public AgentRunStatus Status { get; set; } = AgentRunStatus.Starting;
     public int? ProcessId { get; set; }
