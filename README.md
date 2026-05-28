@@ -39,31 +39,72 @@ Open a PR with your changes — the docs site rebuilds and redeploys from `main`
 
 Per work item: a branch `devflow/<external-id>-<slug>` is cut from the repo's default branch. Each approved task gets a child branch `devflow/.../<order>-<slug>` and a worktree. A `claude` PTY runs in that worktree; its bytes stream over SignalR to an xterm.js tab the user can type into. When all tasks merge up, the work-item branch becomes a PR.
 
-## Prerequisites
+## Install
 
-- **.NET 10 SDK** (also works with .NET 9 if you change `TargetFramework`)
-- **Node 20+** (developed on Node 24)
-- **`claude` CLI** on `$PATH`, already logged in — Kagura spawns this binary as the user
-- **`git`** on `$PATH`
-- **`gh`** on `$PATH` (only for opening PRs; not required for local use)
-- Triage uses the same logged-in `claude` CLI (headless `claude -p`), so no Anthropic API key is required
-
-## First run
+Kagura ships as a [.NET global tool](https://learn.microsoft.com/dotnet/core/tools/global-tools):
 
 ```bash
-# One command — the Aspire AppHost orchestrates the API + Vite frontend
-# together, injects the API URL into the frontend, and opens a dashboard
-# with logs, traces, and health for both processes.
-dotnet run --project src/Kagura.AppHost
-# → Aspire dashboard prints its own URL on startup
-# → API at http://localhost:5253
-# → Web at http://localhost:5173
-# → DB + DataProtection keys auto-created under ~/.devflow/
+dotnet tool install -g Kagura.Cli
 ```
 
-Make sure the `claude` CLI on `$PATH` is logged in (run `claude` once interactively if not) — triage shells out to it.
+That puts a `kagura` binary on `$PATH`.
 
-To run pieces individually without Aspire: `dotnet watch --project src/Kagura.Api` and, in another terminal, `npm --prefix web/kagura-web run dev`.
+### Prerequisites
+
+- **.NET 10 runtime** — required to run the tool. Get it from [dot.net](https://dotnet.microsoft.com/download).
+- **`claude` CLI** on `$PATH`, already logged in. Kagura shells out to it for triage and runs it as the agent inside each task's worktree, so no Anthropic API key is needed.
+- **`git`** on `$PATH`.
+- **`gh`** on `$PATH` — optional, only needed if you want Kagura to open GitHub pull requests for you.
+
+> Node is **not** required to use Kagura — the React UI is built into the package. You only need Node if you're contributing to the frontend (see [Local development](#local-development) below).
+
+To verify your machine is set up, run:
+
+```bash
+kagura doctor
+```
+
+It checks every prerequisite and prints one OK / FAIL line per check. Exit zero means you're good.
+
+## Quickstart
+
+```bash
+kagura run
+# → Kagura running at http://localhost:5253/
+```
+
+Open that URL — the React UI loads served by the same Kestrel server. On first run, Kagura creates `~/.devflow/` (database, encryption keys, worktrees, transcripts) and prints a one-time banner letting you know.
+
+## Subcommands
+
+| Command | Notes |
+|---|---|
+| `kagura run` | Start the local server. `--port <n>` overrides the default `:5253`. `--verbose` (or `KAGURA_LOG_LEVEL=Debug`) restores the full ASP.NET host logs. `--no-update-check` (or `KAGURA_NO_UPDATE_CHECK=1`) suppresses the daily NuGet version check. |
+| `kagura open` | Open the UI in your default browser. If nothing is running, spawn a server first; honours `--port`. |
+| `kagura doctor` | Diagnose the local install: `claude` CLI, git, gh, state directory, port, database. Non-zero exit if anything fails. |
+| `kagura version` | Print the installed Kagura version and exit. |
+
+## Uninstall
+
+```bash
+dotnet tool uninstall -g Kagura.Cli
+```
+
+That removes the binary. `~/.devflow/` is **left behind** so reinstalling resumes where you left off. To fully remove Kagura, also delete its state directory:
+
+```bash
+rm -rf ~/.devflow
+```
+
+`dotnet tool` has no post-uninstall hook, which is why this last step has to be manual.
+
+## Privacy / telemetry
+
+Kagura sends **no telemetry**. The only outbound network request the tool ever makes on its own is an optional version check against `https://api.nuget.org/v3-flatcontainer/kagura.cli/index.json` — the same public, unauthenticated endpoint `dotnet restore` uses to look up packages. Disable it with `--no-update-check` or `KAGURA_NO_UPDATE_CHECK=1`.
+
+The `claude` CLI you've already installed is what talks to Anthropic — Kagura just shells out to it.
+
+## Walkthrough
 
 In the UI:
 
@@ -169,9 +210,36 @@ Kagura.sln
 
 Hub: `/hubs/agent` (SignalR). Client → server: `Join(runId)`, `Leave(runId)`, `Input(runId, base64)`, `Resize(runId, cols, rows)`. Server → client: `data(runId, base64)`, `exit(runId, exitCode|null)`.
 
-## Development
+## Local development
+
+This section is for contributors hacking on Kagura itself — install the global tool (above) if you just want to use it.
+
+### Prerequisites for contributors
+
+In addition to the user prereqs above:
+
+- **.NET 10 SDK** (the runtime alone is enough for end users; the SDK is required to build).
+- **Node 20+** (developed on Node 24) — for the React frontend.
+- `dotnet dev-certs https --trust` — first time only, so the API can serve HTTPS without warnings.
+
+### Dev flow
+
+```bash
+# Aspire AppHost orchestrates the API + Vite frontend together,
+# injects the API URL into the frontend, and opens a dashboard with
+# logs, traces, and health for both processes.
+dotnet run --project src/Kagura.AppHost
+# → Aspire dashboard prints its own URL on startup
+# → API at http://localhost:5253
+# → Web at http://localhost:5173 (Vite HMR)
+# → DB + DataProtection keys auto-created under ~/.devflow/
+```
+
+To run pieces individually without Aspire: `dotnet watch --project src/Kagura.Api` and, in another terminal, `npm --prefix web/kagura-web run dev`.
 
 ### Build
+
+
 
 ```bash
 dotnet build              # whole .NET solution
