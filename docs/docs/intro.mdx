@@ -1,47 +1,64 @@
 ---
 sidebar_position: 1
+title: Introduction
+slug: /intro
 ---
 
-# Tutorial Intro
+# Kagura
 
-Let's discover **Docusaurus in less than 5 minutes**.
+Kagura is a local **devflow** app for a single developer's workstation. It
+pulls issues from your trackers — GitHub, Azure DevOps, Beads, or plain
+Markdown files — triages each one into a small set of parallelisable
+sub-tasks using the `claude` CLI, then runs those tasks as real, attachable
+`claude` sessions inside isolated git worktrees.
 
-## Getting Started
+When every task lands, Kagura merges the work-item branch up and opens a
+pull request via `gh`.
 
-Get started by **creating a new site**.
+> Single-user, local-only, no auth. Built for the workflow of one developer
+> juggling many concurrent agents.
 
-Or **try Docusaurus immediately** with **[docusaurus.new](https://docusaurus.new)**.
+## What you can do with it
 
-### What you'll need
+- **Aggregate issues** from multiple sources in one UI without context-
+  switching between trackers.
+- **Triage with Claude** — turn a vague issue into 1–3 ordered tasks small
+  enough for an agent to land in one sitting.
+- **Run agents in parallel** — each task gets its own git worktree and its
+  own `claude` PTY session, capped by a configurable concurrency limit.
+- **Attach, type, and steer** — every PTY streams to an in-browser xterm.js
+  tab over SignalR, so you can drop in to redirect an agent or unblock it.
+- **Carry to PR automatically** with [Ralph Loop](./usage#drive-a-work-item-to-pr-with-ralph-loop)
+  — one click that starts, merges, and PRs each task in order, with retries.
 
-- [Node.js](https://nodejs.org/en/download/) version 20.0 or above:
-  - When installing Node.js, you are recommended to check all checkboxes related to dependencies.
+## How it fits together
 
-## Generate a new site
-
-Generate a new Docusaurus site using the **classic template**.
-
-The classic template will automatically be added to your project after you run the command:
-
-```bash
-npm init docusaurus@latest my-website classic
+```
+┌──────────────────────────┐         ┌──────────────────────────────────┐
+│  React + xterm.js (5173) │ <─SR──> │  ASP.NET Core API (5253)         │
+│  Sources / WorkItems UI  │ <─REST─>│  + SignalR /hubs/agent           │
+└──────────────────────────┘         │  + EF Core (SQLite)              │
+                                     │  + claude CLI (triage)           │
+                                     │  + Porta.Pty (claude PTYs)       │
+                                     │  + git CLI (worktrees, PRs)      │
+                                     └──────────────────────────────────┘
+                                                  │
+                                                  ▼
+                                       ~/.devflow/kagura.db
+                                       ~/.devflow/keys/
+                                       ~/.devflow/worktrees/<wi>/<task>/
+                                       ~/.devflow/transcripts/
 ```
 
-You can type this command into Command Prompt, Powershell, Terminal, or any other integrated terminal of your code editor.
+The whole stack is orchestrated by [.NET Aspire](https://learn.microsoft.com/dotnet/aspire/) —
+one `dotnet run` starts the API, the Vite frontend, and a dashboard with
+logs, traces, and health for both.
 
-The command also installs all necessary dependencies you need to run Docusaurus.
+## Where to go next
 
-## Start your site
-
-Run the development server:
-
-```bash
-cd my-website
-npm run start
-```
-
-The `cd` command changes the directory you're working with. In order to work with your newly created Docusaurus site, you'll need to navigate the terminal there.
-
-The `npm run start` command builds your website locally and serves it through a development server, ready for you to view at http://localhost:3000/.
-
-Open `docs/intro.md` (this page) and edit some lines: the site **reloads automatically** and displays your changes.
+- **[Setup](./setup)** — install prerequisites and boot Kagura on a fresh
+  machine.
+- **[Usage](./usage)** — the four flows you'll touch most often: filtering,
+  triage, the `Closed` status, and Ralph Loop.
+- **[GitHub repo](https://github.com/ODumpling/Kagura)** — full source, the
+  REST API reference, and the on-disk layout under `~/.devflow/`.

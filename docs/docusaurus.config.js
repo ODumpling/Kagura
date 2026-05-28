@@ -49,17 +49,7 @@ const config = {
           sidebarPath: './sidebars.js',
           editUrl: 'https://github.com/ODumpling/Kagura/tree/main/docs/',
         },
-        blog: {
-          showReadingTime: true,
-          feedOptions: {
-            type: ['rss', 'atom'],
-            xslt: true,
-          },
-          editUrl: 'https://github.com/ODumpling/Kagura/tree/main/docs/',
-          onInlineTags: 'warn',
-          onInlineAuthors: 'warn',
-          onUntruncatedBlogPosts: 'warn',
-        },
+        blog: false,
         theme: {
           customCss: './src/css/custom.css',
         },
@@ -87,7 +77,6 @@ const config = {
             position: 'left',
             label: 'Docs',
           },
-          {to: '/blog', label: 'Blog', position: 'left'},
           {
             href: 'https://github.com/ODumpling/Kagura',
             label: 'GitHub',
@@ -101,19 +90,14 @@ const config = {
           {
             title: 'Docs',
             items: [
-              {
-                label: 'Getting started',
-                to: '/docs/intro',
-              },
+              {label: 'Introduction', to: '/docs/intro'},
+              {label: 'Setup', to: '/docs/setup'},
+              {label: 'Usage', to: '/docs/usage'},
             ],
           },
           {
             title: 'More',
             items: [
-              {
-                label: 'Blog',
-                to: '/blog',
-              },
               {
                 label: 'GitHub',
                 href: 'https://github.com/ODumpling/Kagura',
