@@ -52,6 +52,7 @@ runCommand.SetHandler(async (int port, bool verbose, bool noUpdateCheck) =>
     await hostTask;
 }, portOption, verboseOption, noUpdateCheckOption);
 root.AddCommand(runCommand);
+root.AddCommand(OpenCommand.Build());
 
 var versionCommand = new Command("version", "Print the installed Kagura version.");
 versionCommand.SetHandler(() =>
