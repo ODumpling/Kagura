@@ -11,14 +11,31 @@ using Kagura.Data;
 using Kagura.Data.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 
 namespace Kagura.Api;
 
 public static class KaguraApiHost
 {
-    public static async Task RunAsync(string[] args, CancellationToken ct = default)
+    /// <summary>
+    /// Boot the Kagura API in-process. The CLI passes a <paramref name="spaFileProvider"/> with the
+    /// embedded React bundle so unknown routes fall through to <c>index.html</c>; dev callers
+    /// (the AppHost flow) pass <c>null</c> and Vite serves the SPA on its own port.
+    /// </summary>
+    public static Task RunAsync(
+        string[] args,
+        IFileProvider? spaFileProvider = null,
+        CancellationToken cancellationToken = default)
     {
         var builder = WebApplication.CreateBuilder(args);
+
+        // Default listening URL when no other source (env var / launchSettings / Aspire) overrides.
+        // The AppHost dev flow sets ASPNETCORE_URLS via Aspire, so this only kicks in for the CLI.
+        if (string.IsNullOrEmpty(builder.Configuration["urls"]) &&
+            string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+        {
+            builder.WebHost.UseUrls("http://localhost:5253");
+        }
 
         builder.AddServiceDefaults();
 
@@ -120,16 +137,51 @@ public static class KaguraApiHost
 
         app.UseCors();
         app.MapDefaultEndpoints();
-        app.MapGet("/", () => Results.Ok(new { app = "Kagura", status = "ok" }));
         app.MapSourceEndpoints();
         app.MapWorkItemEndpoints();
         app.MapTriageEndpoints();
         app.MapAgentEndpoints();
         app.MapHub<AgentHub>("/hubs/agent");
 
-        await app.RunAsync(ct);
+        if (spaFileProvider is not null)
+        {
+            UseSpa(app, spaFileProvider);
+        }
+        else
+        {
+            app.MapGet("/", () => Results.Ok(new { app = "Kagura", status = "ok" }));
+        }
+
+        return app.RunAsync(cancellationToken);
     }
 
-    static string ResolvePath(string path) =>
-        path.StartsWith("~/") ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..]) : path;
+    private static void UseSpa(WebApplication app, IFileProvider spa)
+    {
+        var defaultFiles = new DefaultFilesOptions { FileProvider = spa };
+        defaultFiles.DefaultFileNames.Clear();
+        defaultFiles.DefaultFileNames.Add("index.html");
+        app.UseDefaultFiles(defaultFiles);
+
+        app.UseStaticFiles(new StaticFileOptions { FileProvider = spa });
+
+        // SPA fallback: any unmatched non-API route serves index.html.
+        app.MapFallback(async context =>
+        {
+            var file = spa.GetFileInfo("index.html");
+            if (!file.Exists)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await using var stream = file.CreateReadStream();
+            await stream.CopyToAsync(context.Response.Body);
+        });
+    }
+
+    private static string ResolvePath(string path) =>
+        path.StartsWith("~/", StringComparison.Ordinal)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
+            : path;
 }
