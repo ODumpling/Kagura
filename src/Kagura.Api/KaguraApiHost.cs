@@ -10,8 +10,11 @@ using Kagura.Core.Triage;
 using Kagura.Data;
 using Kagura.Data.Services;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging;
 
 namespace Kagura.Api;
 
@@ -28,6 +31,7 @@ public static class KaguraApiHost
         string[] args,
         IFileProvider? spaFileProvider = null,
         int? port = null,
+        bool quiet = false,
         CancellationToken cancellationToken = default)
     {
         var builder = WebApplication.CreateBuilder(args);
@@ -42,6 +46,14 @@ public static class KaguraApiHost
                  string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
         {
             builder.WebHost.UseUrls($"http://localhost:{DefaultPort}");
+        }
+
+        if (quiet)
+        {
+            // Suppress the chatty ASP.NET / EF Core defaults; let `Warning` and above through.
+            builder.Logging.ClearProviders();
+            builder.Logging.AddSimpleConsole(o => o.SingleLine = true);
+            builder.Logging.SetMinimumLevel(LogLevel.Warning);
         }
 
         builder.AddServiceDefaults();
@@ -157,6 +169,17 @@ public static class KaguraApiHost
         else
         {
             app.MapGet("/", () => Results.Ok(new { app = "Kagura", status = "ok" }));
+        }
+
+        if (quiet)
+        {
+            // Replace the suppressed "Now listening on" line with our own one-liner.
+            app.Lifetime.ApplicationStarted.Register(() =>
+            {
+                var addresses = app.Services.GetService<IServer>()?.Features.Get<IServerAddressesFeature>()?.Addresses;
+                var url = addresses?.FirstOrDefault() ?? "http://localhost:5253";
+                Console.WriteLine($"Kagura running at {url}/");
+            });
         }
 
         return app.RunAsync(cancellationToken);
