@@ -26,6 +26,39 @@ export enum AgentTaskStatus {
   Cancelled = 6,
 }
 
+export enum GrillStatus {
+  None = 0,
+  Active = 1,
+  Finalized = 2,
+}
+
+export enum WorkItemCommentRole {
+  User = 0,
+  Assistant = 1,
+}
+
+export interface WorkItemComment {
+  id: string;
+  workItemId: string;
+  role: WorkItemCommentRole;
+  content: string;
+  createdAt: string;
+}
+
+export interface GrillState {
+  workItemId: string;
+  status: GrillStatus;
+  originalBody: string | null;
+  comments: WorkItemComment[];
+}
+
+export interface FinalizeGrillResult {
+  workItemId: string;
+  body: string;
+  originalBody: string | null;
+  status: GrillStatus;
+}
+
 export interface Source {
   id: string;
   name: string;
@@ -119,6 +152,8 @@ export interface AutoReviewResult {
 
 export interface WorkItemDetail extends WorkItemSummary {
   body: string;
+  grillStatus: GrillStatus;
+  originalBody: string | null;
   tasks: AgentTaskDto[];
 }
 

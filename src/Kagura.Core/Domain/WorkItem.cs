@@ -12,6 +12,13 @@ public enum WorkItemStatus
     Closed = 7,
 }
 
+public enum GrillStatus
+{
+    None = 0,
+    Active = 1,
+    Finalized = 2,
+}
+
 public class WorkItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -31,12 +38,16 @@ public class WorkItem
     public bool RalphLoopActive { get; set; }
     public string? RalphLoopHaltReason { get; set; }
 
+    public GrillStatus GrillStatus { get; set; } = GrillStatus.None;
+    public string? OriginalBody { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? TriagedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
 
     public List<AgentTask> Tasks { get; set; } = new();
+    public List<WorkItemComment> Comments { get; set; } = new();
 
     public void MarkClosed(DateTime? now = null)
     {

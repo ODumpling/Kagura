@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch, Bot, OctagonX, AlertTriangle } from 'lucide-react';
+import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch, Bot, OctagonX, AlertTriangle, MessageCircle } from 'lucide-react';
 import { api } from '@/api';
 import { getConnection } from '@/signalr';
-import { type AgentRunDto, AgentTaskStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
+import { type AgentRunDto, AgentTaskStatus, GrillStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
 import { AgentTerminalDialog } from '@/components/AgentTerminalDialog';
+import { GrillPanel } from '@/components/GrillPanel';
 import { Markdown } from '@/components/Markdown';
 import { TaskKanban } from '@/components/TaskKanban';
 import { TaskReviewDialog } from '@/components/TaskReviewDialog';
@@ -354,7 +355,19 @@ export function WorkItemDetailPage() {
 
       <Tabs defaultValue="board" className="flex flex-1 flex-col min-h-0">
         <TabsList className="shrink-0">
-          <TabsTrigger value="body">Body</TabsTrigger>
+          <TabsTrigger value="body">
+            Body
+            {item.grillStatus === GrillStatus.Finalized && (
+              <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px]">grilled</Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="grill">
+            <MessageCircle className="size-3.5 mr-1" />
+            Grill
+            {item.grillStatus === GrillStatus.Active && (
+              <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px]">active</Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="board">
             Board
             {item.tasks.length > 0 && (
@@ -371,8 +384,29 @@ export function WorkItemDetailPage() {
                   ? <Markdown>{item.body}</Markdown>
                   : <p className="text-xs text-muted-foreground italic">(empty)</p>}
               </ScrollArea>
+              {item.grillStatus === GrillStatus.Finalized && item.originalBody && (
+                <details className="mt-3 text-xs">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    Show original imported body
+                  </summary>
+                  <ScrollArea className="mt-2 max-h-64 rounded-md border bg-muted/20 p-3">
+                    <Markdown>{item.originalBody}</Markdown>
+                  </ScrollArea>
+                </details>
+              )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="grill" className="flex flex-1 flex-col min-h-0">
+          <GrillPanel
+            workItemId={item.id}
+            workItemTitle={item.title}
+            status={item.grillStatus}
+            disabled={isClosed}
+            disabledReason={isClosed ? 'Work item is closed.' : undefined}
+            onChanged={reload}
+          />
         </TabsContent>
 
         <TabsContent value="board">
