@@ -52,6 +52,8 @@ public class RalphLoopDriverTests
         var run = new AgentRun
         {
             AgentTaskId = task.Id,
+            WorkItemId = wi.Id,
+            Kind = AgentRunKind.TaskAgent,
             Status = AgentRunStatus.Crashed,
             StartedAt = DateTime.UtcNow.AddMinutes(-1),
             EndedAt = DateTime.UtcNow,
@@ -114,6 +116,8 @@ public class RalphLoopDriverTests
         var run = new AgentRun
         {
             AgentTaskId = task.Id,
+            WorkItemId = wi.Id,
+            Kind = AgentRunKind.TaskAgent,
             Status = AgentRunStatus.Crashed,
             StartedAt = DateTime.UtcNow.AddMinutes(-1),
             EndedAt = DateTime.UtcNow,

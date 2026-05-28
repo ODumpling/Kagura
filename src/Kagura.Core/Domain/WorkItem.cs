@@ -37,6 +37,7 @@ public class WorkItem
     public DateTime? ClosedAt { get; set; }
 
     public List<AgentTask> Tasks { get; set; } = new();
+    public List<AgentRun> Runs { get; set; } = new();
 
     public void MarkClosed(DateTime? now = null)
     {
