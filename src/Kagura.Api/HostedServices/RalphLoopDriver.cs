@@ -277,6 +277,8 @@ public sealed class RalphLoopDriver
                 {
                     Id = session.RunId,
                     AgentTaskId = task.Id,
+                    WorkItemId = task.WorkItemId,
+                    Kind = AgentRunKind.TaskAgent,
                     Status = AgentRunStatus.Running,
                     ProcessId = session.ProcessId,
                     TranscriptLogPath = session.TranscriptLogPath,
