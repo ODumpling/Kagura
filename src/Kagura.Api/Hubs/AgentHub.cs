@@ -1,4 +1,5 @@
 using Kagura.Core.Agents;
+using Kagura.Core.Domain;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Kagura.Api.Hubs;
@@ -44,7 +45,12 @@ public class AgentHub : Hub
     public async Task Input(string runId, string base64Bytes)
     {
         var session = _runner.Get(Guid.Parse(runId));
-        if (session is null || !session.Alive) return;
+        if (session is null)
+            throw new HubException($"No active run {runId}.");
+        if (!session.Alive)
+            throw new HubException($"Run {runId} has exited; input is not accepted.");
+        if (session.Kind != AgentRunKind.TaskAgent)
+            throw new HubException($"Run {runId} is read-only ({session.Kind}); input is not accepted.");
         var data = Convert.FromBase64String(base64Bytes);
         await session.WriteAsync(data);
     }
