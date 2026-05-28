@@ -1,16 +1,30 @@
 using System.CommandLine;
+using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using Kagura.Api;
 using Microsoft.Extensions.FileProviders;
 
 var root = new RootCommand("Kagura — local dev-flow assistant. Run `kagura run` to start the server.");
 
+var portOption = new Option<int>(
+    aliases: new[] { "--port", "-p" },
+    getDefaultValue: () => KaguraApiHost.DefaultPort,
+    description: "TCP port to listen on (default: 5253).");
+
 var runCommand = new Command("run", "Start the Kagura server (Kestrel on :5253).");
-runCommand.SetHandler(async () =>
+runCommand.AddOption(portOption);
+runCommand.SetHandler(async (int port) =>
 {
+    if (!TryReservePort(port))
+    {
+        Console.Error.WriteLine($"port {port} in use — pass --port <n> to override");
+        Environment.Exit(1);
+    }
+
     var spa = TryCreateEmbeddedSpaProvider();
-    await KaguraApiHost.RunAsync(args, spa);
-});
+    await KaguraApiHost.RunAsync(args, spa, port);
+}, portOption);
 root.AddCommand(runCommand);
 
 var versionCommand = new Command("version", "Print the installed Kagura version.");
@@ -21,6 +35,19 @@ versionCommand.SetHandler(() =>
 root.AddCommand(versionCommand);
 
 return await root.InvokeAsync(args);
+
+static string GetInformationalVersion()
+{
+    var attr = Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+
+    var raw = attr?.InformationalVersion ?? "0.0.0";
+
+    // MinVer's AssemblyInformationalVersion can include a `+<sha>` build-metadata suffix —
+    // strip it so `kagura version` prints a clean semver.
+    var plus = raw.IndexOf('+');
+    return plus >= 0 ? raw[..plus] : raw;
+}
 
 static IFileProvider? TryCreateEmbeddedSpaProvider()
 {
@@ -37,15 +64,22 @@ static IFileProvider? TryCreateEmbeddedSpaProvider()
     return new ManifestEmbeddedFileProvider(assembly, "wwwroot");
 }
 
-static string GetInformationalVersion()
+// Best-effort probe: open a listener on the requested port, then immediately close it.
+// If another process holds the port, the bind throws SocketException(AddressAlreadyInUse)
+// and we surface the friendly message before Kestrel ever logs its own stack trace.
+// There is a tiny TOCTOU window between probe-close and Kestrel-open; if a race loses,
+// Kestrel will throw — but in practice the message is much friendlier than the bare trace.
+static bool TryReservePort(int port)
 {
-    var attr = Assembly.GetExecutingAssembly()
-        .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
-
-    var raw = attr?.InformationalVersion ?? "0.0.0";
-
-    // MinVer's AssemblyInformationalVersion can include a `+<sha>` build metadata suffix —
-    // strip it so `kagura version` prints a clean semver.
-    var plus = raw.IndexOf('+');
-    return plus >= 0 ? raw[..plus] : raw;
+    try
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+        listener.Stop();
+        return true;
+    }
+    catch (SocketException s) when (s.SocketErrorCode == SocketError.AddressAlreadyInUse)
+    {
+        return false;
+    }
 }
