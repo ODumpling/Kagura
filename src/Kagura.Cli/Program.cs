@@ -13,9 +13,14 @@ var portOption = new Option<int>(
     getDefaultValue: () => KaguraApiHost.DefaultPort,
     description: "TCP port to listen on (default: 5253).");
 
+var verboseOption = new Option<bool>(
+    aliases: new[] { "--verbose", "-v" },
+    description: "Show full ASP.NET host logs (otherwise warnings and errors only).");
+
 var runCommand = new Command("run", "Start the Kagura server (Kestrel on :5253).");
 runCommand.AddOption(portOption);
-runCommand.SetHandler(async (int port) =>
+runCommand.AddOption(verboseOption);
+runCommand.SetHandler(async (int port, bool verbose) =>
 {
     if (!TryReservePort(port))
     {
@@ -24,8 +29,9 @@ runCommand.SetHandler(async (int port) =>
     }
 
     var spa = TryCreateEmbeddedSpaProvider();
-    await KaguraApiHost.RunAsync(args, spa, port);
-}, portOption);
+    var quiet = !ShouldBeVerbose(verbose);
+    await KaguraApiHost.RunAsync(args, spa, port, quiet);
+}, portOption, verboseOption);
 root.AddCommand(runCommand);
 
 var versionCommand = new Command("version", "Print the installed Kagura version.");
@@ -38,6 +44,17 @@ root.AddCommand(versionCommand);
 root.AddCommand(DoctorCommand.Build());
 
 return await root.InvokeAsync(args);
+
+static bool ShouldBeVerbose(bool flag)
+{
+    if (flag) return true;
+    var env = Environment.GetEnvironmentVariable("KAGURA_LOG_LEVEL");
+    if (string.IsNullOrEmpty(env)) return false;
+    // Anything debug/trace/information turns the floodgates on.
+    return env.Equals("Debug", StringComparison.OrdinalIgnoreCase)
+        || env.Equals("Trace", StringComparison.OrdinalIgnoreCase)
+        || env.Equals("Information", StringComparison.OrdinalIgnoreCase);
+}
 
 static string GetInformationalVersion()
 {
