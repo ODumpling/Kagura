@@ -3,6 +3,7 @@ using Kagura.Api.HostedServices;
 using Kagura.Api.Hubs;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
+using Kagura.Core.Grill;
 using Kagura.Core.Merge;
 using Kagura.Core.Review;
 using Kagura.Core.Sources;
@@ -102,6 +103,13 @@ public static class KaguraApiHost
         });
         builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
 
+        builder.Services.Configure<GrillOptions>(opt =>
+        {
+            opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+            opt.Model = builder.Configuration["Grill:Model"];
+        });
+        builder.Services.AddScoped<IGrillService, ClaudeCliGrillService>();
+
         builder.Services.Configure<MergeResolverOptions>(opt =>
         {
             opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
@@ -185,8 +193,18 @@ public static class KaguraApiHost
         app.MapSourceEndpoints();
         app.MapWorkItemEndpoints();
         app.MapTriageEndpoints();
+        app.MapGrillEndpoints();
         app.MapAgentEndpoints();
         app.MapHub<AgentHub>("/hubs/agent");
+
+        // Dedicated identification probe used by `kagura stop` to verify the listener
+        // actually belongs to Kagura before sending SIGKILL.
+        app.MapGet("/api/ping", () => Results.Ok(new
+        {
+            app = "Kagura",
+            pid = Environment.ProcessId,
+            version = GetInformationalVersion(),
+        }));
 
         if (spaFileProvider is not null)
         {
@@ -197,6 +215,8 @@ public static class KaguraApiHost
             app.MapGet("/", () => Results.Ok(new { app = "Kagura", status = "ok" }));
         }
 
+        var isTesting = app.Environment.IsEnvironment("Testing");
+
         if (quiet)
         {
             // Replace the suppressed "Now listening on" line with our own one-liner.
@@ -205,6 +225,22 @@ public static class KaguraApiHost
                 var addresses = app.Services.GetService<IServer>()?.Features.Get<IServerAddressesFeature>()?.Addresses;
                 var url = addresses?.FirstOrDefault() ?? "http://localhost:5253";
                 Console.WriteLine($"Kagura running at {url}/");
+            });
+        }
+
+        if (!isTesting)
+        {
+            var pidFilePath = PidFilePath(stateDir);
+            app.Lifetime.ApplicationStarted.Register(() =>
+            {
+                var addresses = app.Services.GetService<IServer>()?.Features.Get<IServerAddressesFeature>()?.Addresses;
+                var url = addresses?.FirstOrDefault() ?? $"http://localhost:{port ?? DefaultPort}";
+                WritePidFile(pidFilePath, url);
+            });
+            app.Lifetime.ApplicationStopping.Register(() =>
+            {
+                try { if (File.Exists(pidFilePath)) File.Delete(pidFilePath); }
+                catch { /* best effort */ }
             });
         }
 
@@ -234,6 +270,35 @@ public static class KaguraApiHost
             await using var stream = file.CreateReadStream();
             await stream.CopyToAsync(context.Response.Body);
         });
+    }
+
+    public static string RuntimeDirectoryFor(string stateDir) =>
+        Path.Combine(stateDir, "runtime");
+
+    private static string PidFilePath(string stateDir)
+    {
+        var runtime = RuntimeDirectoryFor(stateDir);
+        Directory.CreateDirectory(runtime);
+        return Path.Combine(runtime, $"{Environment.ProcessId}.json");
+    }
+
+    private static void WritePidFile(string path, string url)
+    {
+        try
+        {
+            var payload = new
+            {
+                pid = Environment.ProcessId,
+                url,
+                startedAt = DateTime.UtcNow.ToString("o"),
+                version = GetInformationalVersion(),
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(payload));
+        }
+        catch
+        {
+            // Best-effort: a missing pid file just means `kagura stop` won't find this instance.
+        }
     }
 
     private static string ResolvePath(string path) =>
