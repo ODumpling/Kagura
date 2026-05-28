@@ -3,6 +3,7 @@ using System;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Kagura.Data.Migrations
 {
     [DbContext(typeof(KaguraDbContext))]
-    partial class KaguraDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260528133019_AddGrillFields")]
+    partial class AddGrillFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -23,7 +26,7 @@ namespace Kagura.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("AgentTaskId")
+                    b.Property<Guid>("AgentTaskId")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("EndedAt")
@@ -31,11 +34,6 @@ namespace Kagura.Data.Migrations
 
                     b.Property<int?>("ExitCode")
                         .HasColumnType("INTEGER");
-
-                    b.Property<int>("Kind")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(0);
 
                     b.Property<int?>("ProcessId")
                         .HasColumnType("INTEGER");
@@ -50,16 +48,9 @@ namespace Kagura.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("WorkItemId")
-                        .HasColumnType("TEXT");
-
                     b.HasKey("Id");
 
                     b.HasIndex("AgentTaskId");
-
-                    b.HasIndex("Kind");
-
-                    b.HasIndex("WorkItemId");
 
                     b.ToTable("AgentRuns");
                 });
@@ -190,9 +181,6 @@ namespace Kagura.Data.Migrations
                     b.Property<string>("Labels")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("LastTriageError")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("OriginalBody")
                         .HasColumnType("TEXT");
 
@@ -264,17 +252,10 @@ namespace Kagura.Data.Migrations
                     b.HasOne("Kagura.Core.Domain.AgentTask", "AgentTask")
                         .WithMany("Runs")
                         .HasForeignKey("AgentTaskId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("Kagura.Core.Domain.WorkItem", "WorkItem")
-                        .WithMany("Runs")
-                        .HasForeignKey("WorkItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.Navigation("AgentTask");
-
-                    b.Navigation("WorkItem");
                 });
 
             modelBuilder.Entity("Kagura.Core.Domain.AgentTask", b =>
@@ -323,8 +304,6 @@ namespace Kagura.Data.Migrations
             modelBuilder.Entity("Kagura.Core.Domain.WorkItem", b =>
                 {
                     b.Navigation("Comments");
-
-                    b.Navigation("Runs");
 
                     b.Navigation("Tasks");
                 });

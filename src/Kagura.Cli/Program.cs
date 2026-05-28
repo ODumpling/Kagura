@@ -62,6 +62,7 @@ versionCommand.SetHandler(() =>
 root.AddCommand(versionCommand);
 
 root.AddCommand(DoctorCommand.Build());
+root.AddCommand(StopCommand.Build());
 
 return await root.InvokeAsync(args);
 

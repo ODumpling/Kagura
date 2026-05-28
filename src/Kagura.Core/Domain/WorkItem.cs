@@ -12,6 +12,13 @@ public enum WorkItemStatus
     Closed = 7,
 }
 
+public enum GrillStatus
+{
+    None = 0,
+    Active = 1,
+    Finalized = 2,
+}
+
 public class WorkItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -33,6 +40,9 @@ public class WorkItem
 
     public string? LastTriageError { get; set; }
 
+    public GrillStatus GrillStatus { get; set; } = GrillStatus.None;
+    public string? OriginalBody { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? TriagedAt { get; set; }
@@ -40,6 +50,7 @@ public class WorkItem
 
     public List<AgentTask> Tasks { get; set; } = new();
     public List<AgentRun> Runs { get; set; } = new();
+    public List<WorkItemComment> Comments { get; set; } = new();
 
     public void MarkClosed(DateTime? now = null)
     {

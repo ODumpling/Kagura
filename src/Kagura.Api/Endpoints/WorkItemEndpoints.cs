@@ -41,6 +41,8 @@ public record WorkItemDetailDto(
     bool RalphLoopActive,
     string? RalphLoopHaltReason,
     string? LastTriageError,
+    GrillStatus GrillStatus,
+    string? OriginalBody,
     IReadOnlyList<AgentTaskDto> Tasks);
 
 public record AgentTaskDto(
@@ -116,6 +118,7 @@ public static class WorkItemEndpoints
                 w.Status, w.Url, w.Labels, w.BranchName, w.PullRequestUrl,
                 w.UpdatedAt, w.TriagedAt, w.RalphLoopActive, w.RalphLoopHaltReason,
                 w.LastTriageError,
+                w.GrillStatus, w.OriginalBody,
                 w.Tasks.Select(t => new AgentTaskDto(t.Id, t.Title, t.Description, t.Order, t.Status, t.BranchName, t.WorktreePath, t.IncludeInPullRequest, t.ReviewNotes, t.RetryAttempts, t.LastFailureReason)).ToList()));
         });
 

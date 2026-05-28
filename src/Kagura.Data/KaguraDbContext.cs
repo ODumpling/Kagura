@@ -20,6 +20,7 @@ public class KaguraDbContext : DbContext
     public DbSet<WorkItem> WorkItems => Set<WorkItem>();
     public DbSet<AgentTask> AgentTasks => Set<AgentTask>();
     public DbSet<AgentRun> AgentRuns => Set<AgentRun>();
+    public DbSet<WorkItemComment> WorkItemComments => Set<WorkItemComment>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -59,6 +60,14 @@ public class KaguraDbContext : DbContext
             e.HasOne(x => x.WorkItem).WithMany(x => x.Runs).HasForeignKey(x => x.WorkItemId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.WorkItemId);
             e.HasIndex(x => x.Kind);
+        });
+
+        mb.Entity<WorkItemComment>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Content).IsRequired();
+            e.HasOne(x => x.WorkItem).WithMany(x => x.Comments).HasForeignKey(x => x.WorkItemId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.WorkItemId, x.CreatedAt });
         });
     }
 }
