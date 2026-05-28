@@ -178,17 +178,22 @@ public class TriageEndpointTests : IClassFixture<TriageEndpointTests.AppFactory>
         public IReadOnlyList<TriagedTaskProposal> Proposals { get; set; } = Array.Empty<TriagedTaskProposal>();
         public TimeSpan Delay { get; set; } = TimeSpan.Zero;
         public Exception? Throw { get; set; }
+        public IReadOnlyList<ExistingTask>? LastExistingTasks { get; private set; }
 
         public void Reset()
         {
             Proposals = Array.Empty<TriagedTaskProposal>();
             Delay = TimeSpan.Zero;
             Throw = null;
+            LastExistingTasks = null;
         }
 
         public async Task<IReadOnlyList<TriagedTaskProposal>> ProposeTasksAsync(
-            string workItemTitle, string workItemBody, string? labels, CancellationToken ct = default)
+            string workItemTitle, string workItemBody, string? labels,
+            IReadOnlyList<ExistingTask>? existingTasks = null,
+            CancellationToken ct = default)
         {
+            LastExistingTasks = existingTasks;
             if (Delay > TimeSpan.Zero) await Task.Delay(Delay, ct);
             if (Throw is not null) throw Throw;
             return Proposals;
