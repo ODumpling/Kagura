@@ -5,71 +5,108 @@ title: Setup
 
 # Setup
 
-This guide walks a new developer from a fresh machine to a running Kagura instance.
+This guide walks a new user from a clean machine to a running Kagura instance.
 
 ## Prerequisites
 
-Install these before cloning the repo:
+Install these before running Kagura:
 
-- **.NET 10 SDK** — required for the API and the Aspire AppHost. .NET 9 works too if you change `TargetFramework` in the project files. Download from [dot.net](https://dotnet.microsoft.com/download).
-- **Node.js 20+** — required for the Vite-based frontend. Developed on Node 24. Download from [nodejs.org](https://nodejs.org/).
+- **.NET 10 runtime** — required to run the tool. Download from [dot.net](https://dotnet.microsoft.com/download).
 - **`claude` CLI** on your `$PATH`, already logged in. Kagura spawns this binary directly and triage shells out to `claude -p`, so no Anthropic API key is needed.
 - **`git`** on your `$PATH`.
 - **`gh`** on your `$PATH` — optional, only needed if you want Kagura to open GitHub pull requests for you.
 
-### Trust the local HTTPS dev certificate
+Node is **not** required to use Kagura — the React UI is built into the released package. You only need Node if you're contributing to the frontend (see [Local development](#local-development) below).
 
-The first time you run .NET on a machine, trust the local dev cert so the API can serve HTTPS without warnings:
+## Install
 
 ```bash
-dotnet dev-certs https --trust
+dotnet tool install -g Kagura.Cli
 ```
 
-You only need to run this once per machine.
+That puts a `kagura` binary on `$PATH`.
 
-## Clone the repo
+### Verify
+
+```bash
+kagura doctor
+```
+
+`doctor` checks every prerequisite (claude on PATH and authenticated, git, gh, state directory writable, port 5253 free, database at the current migration) and prints one OK / FAIL line per check. Exit zero means you're good.
+
+## Run
+
+```bash
+kagura run
+# → Kagura running at http://localhost:5253/
+```
+
+Open that URL in your browser — the React UI loads served by the same Kestrel server. On first run, Kagura creates `~/.devflow/` (database, encryption keys, worktrees, transcripts) and prints a one-time banner letting you know.
+
+### Subcommand reference
+
+| Command | Notes |
+| --- | --- |
+| `kagura run` | Start the local server. `--port <n>` overrides the default `:5253`. `--verbose` (or `KAGURA_LOG_LEVEL=Debug`) restores the full ASP.NET host logs. `--no-update-check` (or `KAGURA_NO_UPDATE_CHECK=1`) suppresses the daily NuGet version check. |
+| `kagura open` | Open the UI in your default browser. If nothing is running, spawn a server first; honours `--port`. |
+| `kagura doctor` | Diagnose the local install. Non-zero exit if anything fails. |
+| `kagura version` | Print the installed Kagura version and exit. |
+
+## Uninstall
+
+```bash
+dotnet tool uninstall -g Kagura.Cli
+```
+
+That removes the binary. `~/.devflow/` is **left behind** so reinstalling resumes where you left off. To fully remove Kagura, also delete its state directory:
+
+```bash
+rm -rf ~/.devflow
+```
+
+`dotnet tool` has no post-uninstall hook, which is why this last step has to be manual.
+
+## Privacy / telemetry
+
+Kagura sends **no telemetry**. The only outbound network request the tool ever makes on its own is an optional version check against `https://api.nuget.org/v3-flatcontainer/kagura.cli/index.json` — the same public, unauthenticated endpoint `dotnet restore` uses to look up packages. Disable it with `--no-update-check` or `KAGURA_NO_UPDATE_CHECK=1`.
+
+The `claude` CLI you've already installed is what talks to Anthropic — Kagura just shells out to it.
+
+## Troubleshooting
+
+Run `kagura doctor` first — most common first-run failures are diagnosed there.
+
+- **`kagura: command not found`** — make sure `~/.dotnet/tools` is on your `$PATH`. The .NET SDK installer usually does this; reopen your terminal after a fresh install.
+- **`port 5253 in use`** — another process is on that port. Pass `--port <n>` to `kagura run` to pick a different one, or stop the offending process.
+- **Triage fails immediately** — run `claude` once in any terminal to confirm the CLI is on `$PATH` and logged in.
+
+## Local development
+
+This section is for contributors hacking on Kagura itself.
+
+### Additional prereqs
+
+- **.NET 10 SDK** (the runtime alone is enough for end users; the SDK is required to build).
+- **Node 20+** (developed on Node 24) — for the React frontend.
+- `dotnet dev-certs https --trust` — first time only, so the local HTTPS dev cert works without warnings.
+
+### Run from source
 
 ```bash
 git clone https://github.com/ODumpling/Kagura.git
 cd Kagura
-```
-
-## Run the app
-
-Kagura is orchestrated by [.NET Aspire](https://learn.microsoft.com/dotnet/aspire/). A single command boots the API, the Vite frontend, and an Aspire dashboard that aggregates logs, traces, and health for both:
-
-```bash
 dotnet run --project src/Kagura.AppHost
 ```
 
-The first run restores NuGet packages, installs npm dependencies under `web/kagura-web/`, and applies EF Core migrations against a fresh SQLite database at `~/.devflow/kagura.db`. Subsequent starts are fast.
-
-### What you should see
-
-Once startup finishes, three URLs are available:
+The Aspire AppHost orchestrates the API + Vite frontend together, injects the API URL into the frontend, and opens a dashboard that aggregates logs, traces, and health for both:
 
 | Service | URL | Notes |
 | --- | --- | --- |
 | Aspire dashboard | printed in the terminal on startup | Logs, traces, and health for every Kagura process |
 | Kagura API | http://localhost:5253 | ASP.NET Core minimal API + SignalR hub at `/hubs/agent` |
-| Kagura web UI | http://localhost:5173 | Vite + React frontend — start here |
+| Kagura web UI | http://localhost:5173 | Vite + React frontend with HMR |
 
-The Aspire AppHost injects `VITE_API` into the Vite dev server so the frontend always knows where the API is. Open the web URL in your browser to start using Kagura.
-
-## Verify the install
-
-You're set up correctly when:
-
-1. The Aspire dashboard loads in your browser and both `Kagura.Api` and `kagura-web` show as **Running**.
-2. http://localhost:5173 renders the Kagura UI with no console errors.
-3. http://localhost:5253/api/sources returns `[]` (an empty JSON array) — the API and database are wired up.
-
-## Troubleshooting
-
-- **`dotnet` command not found** — install the .NET SDK and reopen your terminal.
-- **HTTPS warnings in the browser** — re-run `dotnet dev-certs https --trust` and restart the browser.
-- **Vite can't reach the API** — make sure you started the app via `src/Kagura.AppHost`, not `src/Kagura.Api` on its own. Aspire is responsible for wiring the two together.
-- **Triage fails immediately** — run `claude` once in any terminal to confirm the CLI is on `$PATH` and logged in.
+To run pieces individually without Aspire: `dotnet watch --project src/Kagura.Api` and, in another terminal, `npm --prefix web/kagura-web run dev`.
 
 ## Next steps
 
