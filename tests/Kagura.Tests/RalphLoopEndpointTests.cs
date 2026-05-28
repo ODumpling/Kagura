@@ -63,18 +63,18 @@ public class RalphLoopEndpointTests : IClassFixture<RalphLoopEndpointTests.AppFa
     }
 
     [Fact]
-    public async Task POST_ralph_loop_rejects_work_item_with_more_than_three_tasks()
+    public async Task POST_ralph_loop_accepts_work_item_with_more_than_three_tasks()
     {
-        var wiId = await SeedAsync(taskCount: 4, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved);
+        var wiId = await SeedAsync(taskCount: 5, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved);
 
         using var client = _app.CreateClient();
         var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop", null);
-        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         using var scope = _app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
         var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
-        Assert.False(wi.RalphLoopActive);
+        Assert.True(wi.RalphLoopActive);
     }
 
     [Fact]

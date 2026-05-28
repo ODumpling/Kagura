@@ -414,9 +414,6 @@ public static class WorkItemEndpoints
             if (wi.Tasks.Count == 0)
                 return Results.BadRequest(new { error = "No tasks on this work item." });
 
-            if (wi.Tasks.Count > 3)
-                return Results.BadRequest(new { error = $"Ralph Loop supports up to 3 tasks per work item; this one has {wi.Tasks.Count}." });
-
             if (wi.Tasks.All(t => t.Status == AgentTaskStatus.Merged))
                 return Results.BadRequest(new { error = "All tasks already merged." });
 

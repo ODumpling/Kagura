@@ -208,7 +208,6 @@ export function WorkItemDetailPage() {
   const canFinish = !hasRunning && (reviewable > 0 || mergedCount > 0) && item.status !== WorkItemStatus.PullRequested && !isClosed;
 
   const ralphActive = item.ralphLoopActive;
-  const ralphTaskCountOk = item.tasks.length > 0 && item.tasks.length <= 3;
   const allMerged = item.tasks.length > 0 && item.tasks.every(t => t.status === AgentTaskStatus.Merged);
   const canShowRalph =
     !isClosed &&
@@ -216,9 +215,6 @@ export function WorkItemDetailPage() {
     item.tasks.length > 0 &&
     !allMerged &&
     (item.status === WorkItemStatus.Triaged || item.status === WorkItemStatus.InProgress);
-  const ralphDisabledTooltip = !ralphTaskCountOk
-    ? `Ralph Loop supports up to 3 tasks per work item; this one has ${item.tasks.length}.`
-    : undefined;
 
   const ralphCurrent = (() => {
     if (!ralphActive) return null;
@@ -274,8 +270,7 @@ export function WorkItemDetailPage() {
               {canShowRalph && (
                 <Button
                   onClick={startRalphLoop}
-                  disabled={busy !== null || !ralphTaskCountOk}
-                  title={ralphDisabledTooltip}
+                  disabled={busy !== null}
                 >
                   {busy === 'ralph-start' ? <Loader2 className="animate-spin" /> : <Bot />}
                   {busy === 'ralph-start'
