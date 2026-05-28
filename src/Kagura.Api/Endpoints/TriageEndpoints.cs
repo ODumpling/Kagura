@@ -159,7 +159,12 @@ public static class TriageEndpoints
 
         try
         {
-            var proposals = await triage.ProposeTasksAsync(wi.Title, wi.Body, wi.Labels);
+            var existing = wi.Tasks
+                .Where(t => t.Status != AgentTaskStatus.Proposed && t.Status != AgentTaskStatus.Cancelled)
+                .OrderBy(t => t.Order)
+                .Select(t => new ExistingTask(t.Title, t.Description))
+                .ToList();
+            var proposals = await triage.ProposeTasksAsync(wi.Title, wi.Body, wi.Labels, existing);
 
             var existingProposed = wi.Tasks.Where(t => t.Status == AgentTaskStatus.Proposed).ToList();
             db.AgentTasks.RemoveRange(existingProposed);
