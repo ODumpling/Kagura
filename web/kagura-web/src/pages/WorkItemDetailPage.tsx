@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch, Bot, OctagonX, AlertTriangle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch, Bot, OctagonX, AlertTriangle, ChevronDown, Terminal as TerminalIcon } from 'lucide-react';
 import { api } from '@/api';
 import { getConnection } from '@/signalr';
-import { type AgentRunDto, AgentTaskStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
+import { type AgentRunDto, AgentRunKind, AgentTaskStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
+import { useAgentSessions } from '@/contexts/AgentSessionsContext';
 import { AgentTerminalDialog } from '@/components/AgentTerminalDialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Markdown } from '@/components/Markdown';
 import { TaskKanban } from '@/components/TaskKanban';
 import { TaskReviewDialog } from '@/components/TaskReviewDialog';
@@ -28,21 +32,24 @@ const wiStatusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline
 
 export function WorkItemDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [item, setItem] = useState<WorkItemDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, AgentRunDto>>({});
-  const [terminalTaskId, setTerminalTaskId] = useState<string | null>(null);
+  const [terminalRunId, setTerminalRunId] = useState<string | null>(null);
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
+  const { sessions: allSessions, refresh: refreshSessions, modalRequest, clearModalRequest } = useAgentSessions();
 
   const reloadRuns = useCallback(async () => {
     try {
       const active = await api.agents.listActive();
       const map: Record<string, AgentRunDto> = {};
-      for (const r of active) map[r.taskId] = r;
+      for (const r of active) if (r.taskId) map[r.taskId] = r;
       setRuns(map);
+      await refreshSessions();
     } catch { /* ignore */ }
-  }, []);
+  }, [refreshSessions]);
 
   const reload = useCallback(async () => {
     if (!id) return;
@@ -51,6 +58,35 @@ export function WorkItemDetailPage() {
   }, [id, reloadRuns]);
 
   useEffect(() => { reload().catch(e => setError(e.message)); }, [reload]);
+
+  // Smart-open: chip clicks for this WI come through context as modalRequest.
+  useEffect(() => {
+    if (modalRequest && id && modalRequest.workItemId === id) {
+      const runId = modalRequest.runId;
+      clearModalRequest();
+      setTerminalRunId(runId);
+    }
+  }, [modalRequest, id, clearModalRequest]);
+
+  const itemRuns = useMemo(
+    () => allSessions.filter((s) => s.run.workItemId === id),
+    [allSessions, id],
+  );
+  const triageSession = itemRuns.find((s) => s.run.kind === AgentRunKind.Triage && s.status !== 'exited');
+  const autoReviewRunsByTask = useMemo(() => {
+    const map: Record<string, AgentRunDto> = {};
+    for (const s of itemRuns) {
+      if (s.run.kind === AgentRunKind.AutoReview && s.run.taskId) map[s.run.taskId] = s.run;
+    }
+    return map;
+  }, [itemRuns]);
+  const allRunsByRunId = useMemo(() => {
+    const map: Record<string, AgentRunDto> = {};
+    for (const s of itemRuns) map[s.run.runId] = s.run;
+    for (const taskId of Object.keys(runs)) map[runs[taskId].runId] = runs[taskId];
+    return map;
+  }, [itemRuns, runs]);
+  const dialogRun = terminalRunId ? allRunsByRunId[terminalRunId] ?? null : null;
 
   // Subscribe to real-time work-item updates over SignalR.
   useEffect(() => {
@@ -109,7 +145,7 @@ export function WorkItemDetailPage() {
     try {
       const run = await api.agents.start(taskId);
       setRuns(r => ({ ...r, [taskId]: run }));
-      setTerminalTaskId(taskId);
+      setTerminalRunId(run.runId);
       await reload();
     } catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
@@ -120,10 +156,21 @@ export function WorkItemDetailPage() {
     try {
       await api.agents.stop(run.runId);
       setRuns(r => { const c = { ...r }; delete c[taskId]; return c; });
-      setTerminalTaskId(t => t === taskId ? null : t);
       await reload();
     }
     catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+  function openTerminalForTask(taskId: string) {
+    const run = runs[taskId];
+    if (run) setTerminalRunId(run.runId);
+  }
+  async function stopRunById(runId: string) {
+    setBusy(runId);
+    try {
+      await api.agents.stop(runId);
+      await reload();
+    } catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
   async function resetTask(taskId: string) {
@@ -198,6 +245,14 @@ export function WorkItemDetailPage() {
     catch (e: any) { setError(e.message); await reload(); }
   }
 
+  function openSession(run: AgentRunDto) {
+    if (run.workItemId === item!.id) {
+      setTerminalRunId(run.runId);
+    } else {
+      navigate(`/agents?run=${run.runId}`);
+    }
+  }
+
   const hasProposed = item.tasks.some(t => t.status === AgentTaskStatus.Proposed);
   const hasApproved = item.tasks.some(t => t.status === AgentTaskStatus.Approved);
   const hasRunning = item.tasks.some(t => t.status === AgentTaskStatus.Running);
@@ -258,15 +313,43 @@ export function WorkItemDetailPage() {
             </Button>
           ) : (
             <>
-              <Button
-                variant="outline"
-                onClick={runTriage}
-                disabled={busy !== null || isClosed}
-                title={isClosed ? 'Work item is closed' : undefined}
-              >
-                {busy === 'triage' ? <Loader2 className="animate-spin" /> : <Sparkles />}
-                {busy === 'triage' ? 'Triaging…' : 'Triage'}
-              </Button>
+              <div className="inline-flex">
+                <Button
+                  variant="outline"
+                  onClick={runTriage}
+                  disabled={busy !== null || isClosed}
+                  title={isClosed ? 'Work item is closed' : undefined}
+                  className={triageSession ? 'rounded-r-none border-r-0' : undefined}
+                >
+                  {busy === 'triage' ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                  {busy === 'triage' ? 'Triaging…' : 'Triage'}
+                </Button>
+                {triageSession && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="rounded-l-none px-2"
+                        aria-label="Active triage session"
+                        title="Active triage session"
+                      >
+                        <ChevronDown />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      <DropdownMenuItem onClick={() => openSession(triageSession.run)}>
+                        <TerminalIcon className="size-3.5" />
+                        <div className="flex flex-col">
+                          <span className="text-xs">View triage session</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {triageSession.status === 'live' ? '● live' : '· connecting'}
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
               {canShowRalph && (
                 <Button
                   onClick={startRalphLoop}
@@ -390,13 +473,15 @@ export function WorkItemDetailPage() {
                 <TaskKanban
                   tasks={item.tasks}
                   runs={runs}
+                  autoReviewRuns={autoReviewRunsByTask}
                   busy={busy}
                   onMove={moveTask}
                   onApprove={approveTask}
                   onStart={startTask}
                   onStop={stopRun}
                   onReset={resetTask}
-                  onOpenTerminal={setTerminalTaskId}
+                  onOpenTerminal={openTerminalForTask}
+                  onOpenReviewTerminal={setTerminalRunId}
                   onOpenTask={setReviewTaskId}
                   onToggleInclude={toggleInclude}
                 />
@@ -425,11 +510,10 @@ export function WorkItemDetailPage() {
       />
 
       <AgentTerminalDialog
-        task={terminalTaskId ? item.tasks.find(t => t.id === terminalTaskId) ?? null : null}
-        run={terminalTaskId ? runs[terminalTaskId] ?? null : null}
-        busy={busy}
-        onClose={() => setTerminalTaskId(null)}
-        onStop={stopRun}
+        run={dialogRun}
+        busy={busy === dialogRun?.runId}
+        onClose={() => setTerminalRunId(null)}
+        onStop={stopRunById}
       />
     </div>
   );

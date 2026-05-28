@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Kagura.Core.Domain;
 using Microsoft.Extensions.Logging;
 using Porta.Pty;
 
@@ -9,6 +10,9 @@ public sealed class AgentSession : IAsyncDisposable
     public Guid RunId { get; }
     public Guid TaskId { get; }
     public Guid WorkItemId { get; }
+    public AgentRunKind Kind { get; }
+    public string Title { get; }
+    public string WorkItemExternalId { get; }
     public string WorktreePath { get; }
     public string TranscriptLogPath { get; }
     public int ProcessId { get; }
@@ -33,11 +37,17 @@ public sealed class AgentSession : IAsyncDisposable
         string worktreePath,
         string transcriptLogPath,
         IPtyConnection pty,
-        ILogger log)
+        ILogger log,
+        AgentRunKind kind = AgentRunKind.TaskAgent,
+        string title = "",
+        string workItemExternalId = "")
     {
         RunId = runId;
         TaskId = taskId;
         WorkItemId = workItemId;
+        Kind = kind;
+        Title = title;
+        WorkItemExternalId = workItemExternalId;
         WorktreePath = worktreePath;
         TranscriptLogPath = transcriptLogPath;
         ProcessId = pty.Pid;
