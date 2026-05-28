@@ -44,15 +44,7 @@ public class ClaudeCliTriageService : ITriageService
     public async Task<IReadOnlyList<TriagedTaskProposal>> ProposeTasksAsync(
         string workItemTitle, string workItemBody, string? labels, CancellationToken ct = default)
     {
-        var userPrompt =
-            $"""
-             Title: {workItemTitle}
-
-             Labels: {labels ?? "(none)"}
-
-             Body:
-             {workItemBody}
-             """;
+        var userPrompt = BuildUserPrompt(workItemTitle, workItemBody, labels, existingTaskTitles: null);
 
         var args = new List<string>
         {
@@ -91,6 +83,35 @@ public class ClaudeCliTriageService : ITriageService
 
         _log.LogInformation("Triage proposed {Count} tasks", arr.Count);
         return arr;
+    }
+
+    public static string BuildUserPrompt(
+        string workItemTitle,
+        string workItemBody,
+        string? labels,
+        IReadOnlyList<string>? existingTaskTitles)
+    {
+        var basePrompt =
+            $"""
+             Title: {workItemTitle}
+
+             Labels: {labels ?? "(none)"}
+
+             Body:
+             {workItemBody}
+             """;
+
+        if (existingTaskTitles is null || existingTaskTitles.Count == 0)
+            return basePrompt;
+
+        var titles = string.Join("\n", existingTaskTitles.Select(t => $"- {t}"));
+        return basePrompt + "\n\n" +
+            $"""
+             Existing tasks already proposed for this issue:
+             {titles}
+
+             Do not propose duplicates of the existing tasks above. Only propose tasks that cover work not already represented.
+             """;
     }
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
