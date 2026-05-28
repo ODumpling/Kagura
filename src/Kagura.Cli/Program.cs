@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using Kagura.Api;
+using Kagura.Cli.Commands;
 using Microsoft.Extensions.FileProviders;
 
 var root = new RootCommand("Kagura — local dev-flow assistant. Run `kagura run` to start the server.");
@@ -26,6 +27,7 @@ runCommand.SetHandler(async (int port) =>
     await KaguraApiHost.RunAsync(args, spa, port);
 }, portOption);
 root.AddCommand(runCommand);
+root.AddCommand(OpenCommand.Build());
 
 return await root.InvokeAsync(args);
 
