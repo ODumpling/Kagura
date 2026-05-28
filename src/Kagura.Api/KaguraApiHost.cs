@@ -22,19 +22,26 @@ public static class KaguraApiHost
     /// embedded React bundle so unknown routes fall through to <c>index.html</c>; dev callers
     /// (the AppHost flow) pass <c>null</c> and Vite serves the SPA on its own port.
     /// </summary>
+    public const int DefaultPort = 5253;
+
     public static Task RunAsync(
         string[] args,
         IFileProvider? spaFileProvider = null,
+        int? port = null,
         CancellationToken cancellationToken = default)
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        // Default listening URL when no other source (env var / launchSettings / Aspire) overrides.
-        // The AppHost dev flow sets ASPNETCORE_URLS via Aspire, so this only kicks in for the CLI.
-        if (string.IsNullOrEmpty(builder.Configuration["urls"]) &&
-            string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+        // Explicit port wins. Otherwise default to :5253 unless something else
+        // (Aspire / ASPNETCORE_URLS / launchSettings) already set a URL.
+        if (port is int p)
         {
-            builder.WebHost.UseUrls("http://localhost:5253");
+            builder.WebHost.UseUrls($"http://localhost:{p}");
+        }
+        else if (string.IsNullOrEmpty(builder.Configuration["urls"]) &&
+                 string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+        {
+            builder.WebHost.UseUrls($"http://localhost:{DefaultPort}");
         }
 
         builder.AddServiceDefaults();
