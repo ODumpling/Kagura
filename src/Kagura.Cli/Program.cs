@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using Kagura.Api;
 using Kagura.Cli.Commands;
+using Kagura.Cli.Updates;
 using Microsoft.Extensions.FileProviders;
 
 var root = new RootCommand("Kagura — local dev-flow assistant. Run `kagura run` to start the server.");
@@ -17,10 +18,15 @@ var verboseOption = new Option<bool>(
     aliases: new[] { "--verbose", "-v" },
     description: "Show full ASP.NET host logs (otherwise warnings and errors only).");
 
+var noUpdateCheckOption = new Option<bool>(
+    "--no-update-check",
+    description: "Skip the NuGet update check on startup.");
+
 var runCommand = new Command("run", "Start the Kagura server (Kestrel on :5253).");
 runCommand.AddOption(portOption);
 runCommand.AddOption(verboseOption);
-runCommand.SetHandler(async (int port, bool verbose) =>
+runCommand.AddOption(noUpdateCheckOption);
+runCommand.SetHandler(async (int port, bool verbose, bool noUpdateCheck) =>
 {
     if (!TryReservePort(port))
     {
@@ -30,8 +36,21 @@ runCommand.SetHandler(async (int port, bool verbose) =>
 
     var spa = TryCreateEmbeddedSpaProvider();
     var quiet = !ShouldBeVerbose(verbose);
-    await KaguraApiHost.RunAsync(args, spa, port, quiet);
-}, portOption, verboseOption);
+    var hostTask = KaguraApiHost.RunAsync(args, spa, port, quiet);
+
+    if (!UpdateChecker.IsSuppressed(noUpdateCheck))
+    {
+        // Fire-and-forget. Delay just enough for Kestrel's "running at" line to print first,
+        // so the upgrade banner appears in the right order. Network failure is silent.
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await UpdateChecker.PrintBannerIfNewerAsync();
+        });
+    }
+
+    await hostTask;
+}, portOption, verboseOption, noUpdateCheckOption);
 root.AddCommand(runCommand);
 
 var versionCommand = new Command("version", "Print the installed Kagura version.");
