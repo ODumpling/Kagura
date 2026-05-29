@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { SourcesPage } from '@/pages/SourcesPage';
 import { WorkItemsPage } from '@/pages/WorkItemsPage';
 import { WorkItemDetailPage } from '@/pages/WorkItemDetailPage';
@@ -14,6 +14,23 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 import { AgentSessionsProvider } from '@/contexts/AgentSessionsContext';
 import { SidebarAgentsProvider } from '@/contexts/SidebarAgentsContext';
 import './App.css';
+
+function AppMain() {
+  const location = useLocation();
+  const fullWidth = location.pathname.startsWith('/agents');
+  const mainClass = `flex flex-1 flex-col p-6 w-full min-h-0${fullWidth ? '' : ' max-w-[1400px]'}`;
+  return (
+    <main className={mainClass}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/workitems" replace />} />
+        <Route path="/sources" element={<SourcesPage />} />
+        <Route path="/workitems" element={<WorkItemsPage />} />
+        <Route path="/workitems/:id" element={<WorkItemDetailPage />} />
+        <Route path="/agents" element={<AgentsPage />} />
+      </Routes>
+    </main>
+  );
+}
 
 export default function App() {
   return (
@@ -35,15 +52,7 @@ export default function App() {
                     <ThemeToggle />
                   </div>
                 </header>
-                <main className="flex flex-1 flex-col p-6 max-w-[1400px] w-full min-h-0">
-                  <Routes>
-                    <Route path="/" element={<Navigate to="/workitems" replace />} />
-                    <Route path="/sources" element={<SourcesPage />} />
-                    <Route path="/workitems" element={<WorkItemsPage />} />
-                    <Route path="/workitems/:id" element={<WorkItemDetailPage />} />
-                    <Route path="/agents" element={<AgentsPage />} />
-                  </Routes>
-                </main>
+                <AppMain />
                 </SidebarInset>
               </SidebarProvider>
              </SidebarAgentsProvider>
