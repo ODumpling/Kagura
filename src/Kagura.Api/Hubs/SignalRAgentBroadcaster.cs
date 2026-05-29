@@ -33,4 +33,26 @@ public class SignalRAgentBroadcaster : IAgentBroadcaster
                 choices = prompt.Choices,
                 createdAt = prompt.CreatedAt,
             });
+
+    // Sidebar tree events — fanned out to all connected clients so every browser tab
+    // sees Agents appear/disappear live. The frontend filters by Source/WorkItem.
+    public Task AgentAppearedAsync(AgentSidebarEvent evt) =>
+        _hub.Clients.All.SendAsync("agentAppeared", new
+        {
+            runId = evt.RunId.ToString(),
+            workItemId = evt.WorkItemId.ToString(),
+            sourceId = evt.SourceId.ToString(),
+            sourceName = evt.SourceName,
+            workItemTitle = evt.WorkItemTitle,
+            workItemExternalId = evt.WorkItemExternalId,
+            kind = (int)evt.Kind,
+            statusLine = evt.StatusLine,
+            startedAt = evt.StartedAt,
+        });
+
+    public Task AgentDismissedAsync(Guid runId) =>
+        _hub.Clients.All.SendAsync("agentDismissed", runId.ToString());
+
+    public Task AgentStatusChangedAsync(Guid runId, string statusLine) =>
+        _hub.Clients.All.SendAsync("agentStatusChanged", runId.ToString(), statusLine);
 }
