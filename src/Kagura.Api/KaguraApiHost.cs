@@ -118,6 +118,7 @@ public static class KaguraApiHost
             opt.Model = builder.Configuration["Grill:Model"];
         });
         builder.Services.AddScoped<IGrillService, ClaudeCliGrillService>();
+        builder.Services.AddScoped<GrillAgentContext>();
 
         builder.Services.Configure<MergeResolverOptions>(opt =>
         {

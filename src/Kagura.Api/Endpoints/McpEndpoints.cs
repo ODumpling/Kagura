@@ -69,13 +69,19 @@ public static class McpEndpoints
                 }),
                 "tools/list" => Ok(id, new
                 {
-                    tools = new[]
+                    tools = new object[]
                     {
                         new
                         {
                             name = Role.Triage.McpSubmitToolName(),
                             description = "Submit the proposed triage tasks for this work item. Calling this tool ends the Triage agent.",
                             inputSchema = TriageInputSchema,
+                        },
+                        new
+                        {
+                            name = Role.Grill.McpSubmitToolName(),
+                            description = "Submit the refined work-item body produced by the grilling conversation. Calling this tool ends the Grill agent.",
+                            inputSchema = GrillInputSchema,
                         },
                     },
                 }),
@@ -117,6 +123,19 @@ public static class McpEndpoints
         additionalProperties = false,
     };
 
+    // JSON Schema for kagura.submit_grill's input. Mirrors GrillSubmission — a single
+    // markdown `body` string that replaces the WorkItem.Body field.
+    private static readonly object GrillInputSchema = new
+    {
+        type = "object",
+        properties = new
+        {
+            body = new { type = "string" },
+        },
+        required = new[] { "body" },
+        additionalProperties = false,
+    };
+
     private static async Task<IResult> CallToolAsync(
         JsonElement? id, JsonElement message, Guid runId,
         IAgentSubmissionCoordinator submissions, ILogger log)
@@ -127,7 +146,7 @@ public static class McpEndpoints
         var name = paramsEl.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
         if (string.IsNullOrEmpty(name)) return InvalidParams(id, "Missing tool name.");
 
-        if (name != Role.Triage.McpSubmitToolName())
+        if (name != Role.Triage.McpSubmitToolName() && name != Role.Grill.McpSubmitToolName())
             return ToolError(id, $"Unknown tool '{name}'.");
 
         if (!paramsEl.TryGetProperty("arguments", out var args) || args.ValueKind != JsonValueKind.Object)

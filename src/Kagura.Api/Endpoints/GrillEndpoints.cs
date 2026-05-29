@@ -152,10 +152,12 @@ public static class GrillEndpoints
             KaguraDbContext db,
             IGrillService grill,
             IAgentBroadcaster broadcaster,
+            GrillAgentContext agentContext,
             CancellationToken ct) =>
         {
             var wi = await db.WorkItems
                 .Include(w => w.Comments)
+                .Include(w => w.Source)
                 .FirstOrDefaultAsync(w => w.Id == workItemId, ct);
             if (wi is null) return Results.NotFound();
             if (wi.Status == WorkItemStatus.Closed)
@@ -168,8 +170,37 @@ public static class GrillEndpoints
                 .Select(c => new GrillTurn(c.Role, c.Content))
                 .ToList();
 
+            // Per ADR 0001: synthesize runs as a PTY Grill Agent that delivers its rewritten
+            // body via the kagura.submit_grill MCP tool. Pre-allocate the AgentRun row so the
+            // resolved prompt can be snapshotted onto it before the PTY spawns, and so the
+            // sidebar can render the run as soon as it appears.
+            var run = new AgentRun
+            {
+                Kind = AgentRunKind.Grill,
+                WorkItemId = wi.Id,
+                Status = AgentRunStatus.Running,
+            };
+            db.AgentRuns.Add(run);
+            await db.SaveChangesAsync(ct);
+
+            agentContext.WorkItem = wi;
+            agentContext.RunId = run.Id;
+
             var originalForSynth = wi.OriginalBody ?? wi.Body;
-            var rewritten = await grill.SynthesizeAsync(wi.Title, originalForSynth, wi.Labels, history, ct);
+            string rewritten;
+            try
+            {
+                rewritten = await grill.SynthesizeAsync(wi.Title, originalForSynth, wi.Labels, history, ct);
+                run.Status = AgentRunStatus.Exited;
+                run.EndedAt = DateTime.UtcNow;
+            }
+            catch
+            {
+                run.Status = AgentRunStatus.Crashed;
+                run.EndedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                throw;
+            }
 
             var now = DateTime.UtcNow;
             wi.OriginalBody ??= wi.Body;

@@ -2,7 +2,11 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Kagura.Core.Agents;
+using Kagura.Core.Agents.Mcp;
 using Kagura.Core.Domain;
+using Kagura.Core.Git;
+using Kagura.Core.Triage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -48,7 +52,7 @@ public class ClaudeCliGrillService : IGrillService
         no role labels.
         """;
 
-    private const string SynthesizeSystemPrompt =
+    private const string LegacySynthesizeSystemPrompt =
         """
         You are rewriting a software work item description from scratch, using the grilling
         transcript between a user and an interviewer to produce a complete, actionable write-up.
@@ -71,12 +75,81 @@ public class ClaudeCliGrillService : IGrillService
         terse — every sentence should carry weight.
         """;
 
+    /// <summary>
+    /// Built-in Grill synthesis prompt template used when the service runs as a PTY Agent.
+    /// Mirrors the Triage default-prompt shape: the body of the message is the work item
+    /// context + transcript, and the last paragraph teaches Claude to deliver its result
+    /// via the MCP submission tool rather than printing it.
+    /// Placeholders: <c>{{TITLE}}</c>, <c>{{LABELS}}</c>, <c>{{ORIGINAL_BODY}}</c>,
+    /// <c>{{TRANSCRIPT}}</c>, <c>{{SUBMIT_TOOL}}</c>.
+    /// </summary>
+    public const string DefaultSynthesizePromptTemplate =
+        """
+        You are rewriting a software work item description from scratch, using the grilling
+        transcript between a user and an interviewer to produce a complete, actionable write-up.
+
+        The write-up replaces the original imported issue body. Include, where the transcript
+        supports it:
+        - Goal and success criteria
+        - Scope (in / out)
+        - Key assumptions
+        - Constraints
+        - Alternatives considered and why rejected
+        - Risks and failure modes
+        - Stakeholders / decision-makers (if relevant)
+        - Trade-offs
+        - Rollback / reversibility
+        - Concrete next step
+
+        Use `##` for section headings. Be precise and terse — every sentence should carry weight.
+
+        # Work item
+
+        Title: {{TITLE}}
+
+        Labels: {{LABELS}}
+
+        Original body:
+        {{ORIGINAL_BODY}}
+
+        # Grilling transcript
+
+        {{TRANSCRIPT}}
+
+        # Delivering the result
+
+        When the rewritten body is ready, call the MCP tool `{{SUBMIT_TOOL}}` with an argument
+        shaped as:
+
+        {
+          "body": "<the rewritten markdown body>"
+        }
+
+        Calling the tool is what hands the result back to Kagura — do not print the markdown to
+        stdout, do not create any files, do not edit the working tree. After the tool call
+        succeeds, exit cleanly.
+        """;
+
     private readonly GrillOptions _options;
+    private readonly GrillAgentContext _context;
+    private readonly IAgentRunner _runner;
+    private readonly GitService _git;
+    private readonly IPromptSnapshotSink _promptSink;
     private readonly ILogger<ClaudeCliGrillService> _log;
 
-    public ClaudeCliGrillService(IOptions<GrillOptions> options, ILogger<ClaudeCliGrillService> log)
+    public ClaudeCliGrillService(
+        IOptions<GrillOptions> options,
+        GrillAgentContext context,
+        IAgentRunner runner,
+        GitService git,
+        IPromptSnapshotSink promptSink,
+        ILogger<ClaudeCliGrillService> log)
     {
         _options = options.Value;
+        _context = context;
+        _runner = runner;
+        _git = git;
+        _promptSink = promptSink;
         _log = log;
     }
 
@@ -87,6 +160,10 @@ public class ClaudeCliGrillService : IGrillService
         IReadOnlyList<GrillTurn> history,
         CancellationToken ct = default)
     {
+        // Per-turn interview replies are not a typed-result submission — they are
+        // conversational text that the chat UI appends as the next assistant comment.
+        // RespondAsync therefore stays on the legacy one-shot path; the Agent migration
+        // covers the terminal SynthesizeAsync step that produces the refined body.
         var userPrompt =
             $"""
              # Work item
@@ -108,12 +185,79 @@ public class ClaudeCliGrillService : IGrillService
         return InvokeClaudeAsync(GrillSystemPrompt, userPrompt, ct);
     }
 
-    public Task<string> SynthesizeAsync(
+    public async Task<string> SynthesizeAsync(
         string workItemTitle,
         string originalBody,
         string? labels,
         IReadOnlyList<GrillTurn> history,
         CancellationToken ct = default)
+    {
+        // Per ADR 0001: when invoked inside the Agent kickoff path, spawn a PTY Grill Agent
+        // and block on its MCP submission. Without a context we fall back to the legacy
+        // one-shot `claude -p` invocation so the strings-only interface still works.
+        if (_context.IsSet)
+            return await SynthesizeViaAgentAsync(workItemTitle, originalBody, labels, history, ct);
+
+        return await SynthesizeViaLegacyCliAsync(workItemTitle, originalBody, labels, history, ct);
+    }
+
+    private async Task<string> SynthesizeViaAgentAsync(
+        string workItemTitle,
+        string originalBody,
+        string? labels,
+        IReadOnlyList<GrillTurn> history,
+        CancellationToken ct)
+    {
+        var wi = _context.WorkItem!;
+        var runId = _context.RunId;
+
+        // Per CONTEXT.md → "Agent working directory": Grill runs in the Source's scratch
+        // worktree on detached HEAD at the default branch. Refresh on every spawn.
+        var cwd = await _git.EnsureScratchWorktreeAsync(wi.Source, ct);
+
+        var prompt = RenderSynthesizePrompt(workItemTitle, originalBody, labels, history);
+
+        // Snapshot the resolved prompt onto AgentRun.PromptText BEFORE spawning so the audit
+        // trail is correct even if the PTY crashes immediately. (ADR 0002.)
+        await _promptSink.SaveAsync(runId, prompt, ct);
+
+        _log.LogInformation(
+            "Spawning Grill Agent for work item {WorkItemId} in scratch worktree {Cwd}",
+            wi.Id, cwd);
+
+        var submission = await _runner.StartAndAwaitResultAsync<GrillSubmission>(
+            runId, wi, Role.Grill, prompt, cwd, ct);
+
+        if (string.IsNullOrWhiteSpace(submission.Body))
+            throw new InvalidOperationException(
+                "Grill Agent submitted an empty body via kagura.submit_grill.");
+
+        _log.LogInformation("Grill Agent produced {Chars} chars", submission.Body.Length);
+        return submission.Body.Trim();
+    }
+
+    public static string RenderSynthesizePrompt(
+        string workItemTitle,
+        string originalBody,
+        string? labels,
+        IReadOnlyList<GrillTurn> history)
+    {
+        return DefaultSynthesizePromptTemplate
+            .Replace("{{TITLE}}", workItemTitle)
+            .Replace("{{LABELS}}", labels ?? "(none)")
+            .Replace("{{ORIGINAL_BODY}}", string.IsNullOrWhiteSpace(originalBody) ? "(empty)" : originalBody)
+            .Replace("{{TRANSCRIPT}}", FormatHistory(history))
+            .Replace("{{SUBMIT_TOOL}}", Role.Grill.McpSubmitToolName());
+    }
+
+    // ---------------- Legacy one-shot fallback ----------------
+
+    private Task<string> SynthesizeViaLegacyCliAsync(
+        string workItemTitle,
+        string originalBody,
+        string? labels,
+        IReadOnlyList<GrillTurn> history,
+        CancellationToken ct)
     {
         var userPrompt =
             $"""
@@ -132,7 +276,7 @@ public class ClaudeCliGrillService : IGrillService
              Produce the rewritten work item description in markdown.
              """;
 
-        return InvokeClaudeAsync(SynthesizeSystemPrompt, userPrompt, ct);
+        return InvokeClaudeAsync(LegacySynthesizeSystemPrompt, userPrompt, ct);
     }
 
     private async Task<string> InvokeClaudeAsync(string systemPrompt, string userPrompt, CancellationToken ct)
