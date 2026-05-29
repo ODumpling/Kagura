@@ -66,6 +66,7 @@ export interface Source {
   localRepoPath: string;
   config: Record<string, unknown>;
   enabled: boolean;
+  autoTriageOnImport: boolean;
   lastSyncedAt: string | null;
   createdAt: string;
 }
@@ -76,6 +77,7 @@ export interface UpsertSource {
   localRepoPath: string;
   config: Record<string, unknown>;
   enabled: boolean;
+  autoTriageOnImport: boolean;
 }
 
 export interface WorkItemSummary {

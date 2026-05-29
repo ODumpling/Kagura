@@ -8,6 +8,7 @@ public class Source
     public required string LocalRepoPath { get; set; }
     public string ConfigJson { get; set; } = "{}";
     public bool Enabled { get; set; } = true;
+    public bool AutoTriageOnImport { get; set; }
     public DateTime? LastSyncedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

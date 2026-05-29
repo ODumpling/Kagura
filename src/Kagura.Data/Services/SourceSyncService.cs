@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Kagura.Data.Services;
 
-public record SyncResult(int Added, int Updated, int Closed, int Total);
+public record SyncResult(int Added, int Updated, int Closed, int Total, IReadOnlyList<Guid> NewlyImportedWorkItemIds);
 
 public class SourceSyncService
 {
@@ -38,6 +38,10 @@ public class SourceSyncService
         var now = DateTime.UtcNow;
 
         var fetchedIds = new HashSet<string>(fetched.Select(f => f.ExternalId), StringComparer.Ordinal);
+        // WorkItems that did not exist before this sync call. Carried back to the caller so
+        // Source.AutoTriageOnImport can spawn a Triage Agent per new New item without the
+        // sync pipeline itself reaching into the kickoff service (which lives in Kagura.Api).
+        var newlyImported = new List<WorkItem>();
 
         foreach (var f in fetched)
         {
@@ -54,7 +58,7 @@ public class SourceSyncService
             }
             else
             {
-                _db.WorkItems.Add(new WorkItem
+                var fresh = new WorkItem
                 {
                     SourceId = source.Id,
                     ExternalId = f.ExternalId,
@@ -62,7 +66,9 @@ public class SourceSyncService
                     Body = f.Body,
                     Url = f.Url,
                     Labels = f.Labels,
-                });
+                };
+                _db.WorkItems.Add(fresh);
+                newlyImported.Add(fresh);
                 added++;
             }
         }
@@ -81,6 +87,14 @@ public class SourceSyncService
         await _db.SaveChangesAsync(ct);
         _log.LogInformation("Synced source {Name}: +{Added} ~{Updated} -{Closed}", source.Name, added, updated, closed);
 
-        return new SyncResult(added, updated, closed, fetched.Count);
+        // Only New items survive the AutoTriageOnImport filter. A fresh import is always New,
+        // but reading the property explicitly keeps the filter honest if upstream logic ever
+        // imports anything else.
+        var newIds = newlyImported
+            .Where(w => w.Status == WorkItemStatus.New)
+            .Select(w => w.Id)
+            .ToList();
+
+        return new SyncResult(added, updated, closed, fetched.Count, newIds);
     }
 }
