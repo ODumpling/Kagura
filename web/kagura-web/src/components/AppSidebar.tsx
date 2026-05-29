@@ -183,8 +183,8 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
 
   return (
     <SidebarMenuSubItem>
-      <NavLink to={`/workitems/${agent.workItemId}?runId=${agent.runId}`} className="flex-1 min-w-0">
-        <SidebarMenuSubButton title={`${label} — ${agent.workItemTitle}\n${agent.statusLine}${exitSuffix}`}>
+      <SidebarMenuSubButton asChild title={`${label} — ${agent.workItemTitle}\n${agent.statusLine}${exitSuffix}`}>
+        <NavLink to={`/workitems/${agent.workItemId}?runId=${agent.runId}`} className="flex-1 min-w-0">
           <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
           <div className="flex flex-col items-start min-w-0 leading-tight">
             <span className="truncate text-[12px]">
@@ -194,8 +194,8 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
               {failed ? `failed${exitSuffix}` : agent.statusLine}
             </span>
           </div>
-        </SidebarMenuSubButton>
-      </NavLink>
+        </NavLink>
+      </SidebarMenuSubButton>
       {failed && (
         <button
           type="button"
