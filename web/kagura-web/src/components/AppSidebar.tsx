@@ -9,9 +9,10 @@ import {
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { useSources } from '@/contexts/SourcesContext';
-import { AgentRunKind, AgentRunKindLabel, SourceType } from '@/types';
+import { AgentRunKind, AgentRunKindLabel, SourceType, type AgentRunDto } from '@/types';
 import { api } from '@/api';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { AgentTerminalDialog } from '@/components/AgentTerminalDialog';
 
 const sourceIcons: Record<SourceType, typeof FileText> = {
   [SourceType.Markdown]: FileText,
@@ -188,18 +189,71 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
     ? `/workitems/${agent.workItemId}/tasks/${agent.taskId}?runId=${agent.runId}`
     : `/workitems/${agent.workItemId}?runId=${agent.runId}`;
 
+  const { sessions, stop } = useAgentSessions();
+  const [open, setOpen] = useState(false);
+  const [stopping, setStopping] = useState(false);
+
+  // Prefer the tracked AgentRunDto from AgentSessionsContext (full DTO with taskId,
+  // worktreePath, etc.). Fall back to a synthesised DTO from the sidebar event so the
+  // dialog still works during the brief window before listActive populates.
+  const run: AgentRunDto = useMemo(() => {
+    const tracked = sessions.find((s) => s.run.runId === agent.runId)?.run;
+    if (tracked) return tracked;
+    return {
+      runId: agent.runId,
+      taskId: '',
+      workItemId: agent.workItemId,
+      kind: agent.kind,
+      title: agent.workItemTitle,
+      workItemExternalId: agent.workItemExternalId,
+      worktreePath: '',
+      processId: 0,
+      startedAt: agent.startedAt,
+      alive: !failed,
+      exitCode: agent.exitCode,
+    };
+  }, [sessions, agent, failed]);
+
+  async function handleStop(runId: string) {
+    setStopping(true);
+    try { await stop(runId); }
+    finally { setStopping(false); }
+  }
+
+  // TaskAgent rows deep-link to the task detail page (issue #84) so users land on
+  // a focused view with branch/worktree + live terminal. All other roles open the
+  // terminal dialog in place (per #85) since they don't have a dedicated page.
+  const isTaskAgentRow = agent.kind === AgentRunKind.TaskAgent && !!agent.taskId;
+  const tooltip = `${label} — ${agent.workItemTitle}${agent.taskTitle ? `\n${agent.taskTitle}` : ''}\n${agent.statusLine}${exitSuffix}`;
+
   return (
     <SidebarMenuSubItem>
-      <SidebarMenuSubButton asChild title={`${label} — ${agent.workItemTitle}${agent.taskTitle ? `\n${agent.taskTitle}` : ''}\n${agent.statusLine}${exitSuffix}`}>
-        <NavLink to={to} className="flex-1 min-w-0">
-          <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
-          <div className="flex flex-col items-start min-w-0 leading-tight">
-            <span className="truncate text-[12px] max-w-[10rem]">{primary}</span>
-            <span className="truncate text-[10px] text-muted-foreground max-w-[10rem]">
-              {failed ? `failed${exitSuffix}` : agent.statusLine}
-            </span>
-          </div>
-        </NavLink>
+      <SidebarMenuSubButton asChild title={tooltip}>
+        {isTaskAgentRow ? (
+          <NavLink to={to} className="flex-1 min-w-0">
+            <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
+            <div className="flex flex-col items-start min-w-0 leading-tight">
+              <span className="truncate text-[12px] max-w-[10rem]">{primary}</span>
+              <span className="truncate text-[10px] text-muted-foreground max-w-[10rem]">
+                {failed ? `failed${exitSuffix}` : agent.statusLine}
+              </span>
+            </div>
+          </NavLink>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(true); }}
+            className="flex-1 min-w-0 text-left"
+          >
+            <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
+            <div className="flex flex-col items-start min-w-0 leading-tight">
+              <span className="truncate text-[12px] max-w-[10rem]">{primary}</span>
+              <span className="truncate text-[10px] text-muted-foreground max-w-[10rem]">
+                {failed ? `failed${exitSuffix}` : agent.statusLine}
+              </span>
+            </div>
+          </button>
+        )}
       </SidebarMenuSubButton>
       {failed && (
         <button
@@ -211,6 +265,13 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
           <X className="h-3 w-3" />
         </button>
       )}
+      <AgentTerminalDialog
+        wide
+        run={open ? run : null}
+        busy={stopping}
+        onClose={() => setOpen(false)}
+        onStop={handleStop}
+      />
     </SidebarMenuSubItem>
   );
 }
