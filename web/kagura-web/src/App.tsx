@@ -4,6 +4,7 @@ import { WorkItemsPage } from '@/pages/WorkItemsPage';
 import { WorkItemDetailPage } from '@/pages/WorkItemDetailPage';
 import { TaskDetailPage } from '@/pages/TaskDetailPage';
 import { AgentsPage } from '@/pages/AgentsPage';
+import { PromptsPage } from '@/pages/PromptsPage';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Separator } from '@/components/ui/separator';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -29,6 +30,7 @@ function AppMain() {
         <Route path="/workitems/:id" element={<WorkItemDetailPage />} />
         <Route path="/workitems/:workItemId/tasks/:taskId" element={<TaskDetailPage />} />
         <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/prompts" element={<PromptsPage />} />
       </Routes>
     </main>
   );
