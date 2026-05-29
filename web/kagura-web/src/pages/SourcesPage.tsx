@@ -126,7 +126,7 @@ function ConfigFields({
 }
 
 export function SourcesPage() {
-  const { sources, refresh } = useSources();
+  const { sources, refresh, markSynced } = useSources();
   const [searchParams, setSearchParams] = useSearchParams();
   const [editing, setEditing] = useState<{ id?: string; draft: UpsertSource } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -153,7 +153,7 @@ export function SourcesPage() {
 
   async function syncOne(id: string) {
     setBusy(id); setError(null);
-    try { await api.sources.sync(id); await refresh(); }
+    try { await api.sources.sync(id); await refresh(); markSynced(); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
