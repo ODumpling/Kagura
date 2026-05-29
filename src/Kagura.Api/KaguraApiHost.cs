@@ -1,6 +1,7 @@
 using Kagura.Api.Endpoints;
 using Kagura.Api.HostedServices;
 using Kagura.Api.Hubs;
+using Kagura.Api.Services;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
 using Kagura.Core.Grill;
@@ -96,6 +97,7 @@ public static class KaguraApiHost
             opt.Model = builder.Configuration["Triage:Model"];
         });
         builder.Services.AddScoped<ITriageService, ClaudeCliTriageService>();
+        builder.Services.AddScoped<ITriageKickoffService, TriageKickoffService>();
 
         builder.Services.Configure<ReviewOptions>(opt =>
         {
@@ -103,6 +105,7 @@ public static class KaguraApiHost
             opt.Model = builder.Configuration["Review:Model"];
         });
         builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
+        builder.Services.AddScoped<IAutoReviewKickoffService, AutoReviewKickoffService>();
         builder.Services.AddSingleton<IReviewPromptCoordinator, InMemoryReviewPromptCoordinator>();
         builder.Services.AddHostedService<ReviewPromptBroadcaster>();
 
