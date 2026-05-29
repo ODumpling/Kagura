@@ -12,6 +12,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { SourcesProvider } from '@/contexts/SourcesContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { AgentSessionsProvider } from '@/contexts/AgentSessionsContext';
+import { SidebarAgentsProvider } from '@/contexts/SidebarAgentsContext';
 import './App.css';
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
         <TooltipProvider>
           <SourcesProvider>
             <AgentSessionsProvider>
+             <SidebarAgentsProvider>
               <SidebarProvider>
                 <AppSidebar />
                 <SidebarInset>
@@ -44,6 +46,7 @@ export default function App() {
                 </main>
                 </SidebarInset>
               </SidebarProvider>
+             </SidebarAgentsProvider>
             </AgentSessionsProvider>
           </SourcesProvider>
         </TooltipProvider>

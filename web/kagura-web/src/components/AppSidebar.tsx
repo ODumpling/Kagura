@@ -1,13 +1,15 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { FileText, GitMerge, GitBranch, FolderGit2, ListTodo, RefreshCw, Plus, Settings, Bot } from 'lucide-react';
+import { FileText, GitMerge, GitBranch, FolderGit2, ListTodo, RefreshCw, Plus, Settings, Bot, X, AlertCircle, Loader2 } from 'lucide-react';
 import { useAgentSessions } from '@/contexts/AgentSessionsContext';
+import { useSidebarAgents, type SidebarAgent } from '@/contexts/SidebarAgentsContext';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
-  SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarSeparator,
+  SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton,
+  SidebarMenuSubItem, SidebarSeparator,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { useSources } from '@/contexts/SourcesContext';
-import { SourceType } from '@/types';
+import { AgentRunKindLabel, SourceType } from '@/types';
 import { api } from '@/api';
 import { useState } from 'react';
 
@@ -21,6 +23,7 @@ const sourceIcons: Record<SourceType, typeof FileText> = {
 export function AppSidebar() {
   const { sources, refresh, markSynced } = useSources();
   const { active } = useAgentSessions();
+  const { bySource: agentsBySource, remove: removeAgent } = useSidebarAgents();
   const location = useLocation();
   const [syncing, setSyncing] = useState(false);
 
@@ -111,17 +114,30 @@ export function AppSidebar() {
               {sources.map(s => {
                 const Icon = sourceIcons[s.type] ?? FileText;
                 const isActive = currentSourceId === s.id;
+                const agents = agentsBySource[s.id] ?? [];
                 return (
                   <SidebarMenuItem key={s.id}>
                     <NavLink to={`/workitems?sourceId=${s.id}`}>
                       <SidebarMenuButton isActive={isActive} tooltip={s.name}>
                         <Icon />
                         <span className="truncate">{s.name}</span>
+                        {agents.length > 0 && (
+                          <span className="ml-auto rounded-full bg-primary/15 text-primary text-[10px] px-1.5 py-0.5 leading-none group-data-[collapsible=icon]:hidden">
+                            {agents.length}
+                          </span>
+                        )}
                         {!s.enabled && (
                           <span className="ml-auto text-[10px] text-muted-foreground">off</span>
                         )}
                       </SidebarMenuButton>
                     </NavLink>
+                    {agents.length > 0 && (
+                      <SidebarMenuSub className="group-data-[collapsible=icon]:hidden">
+                        {agents.map(a => (
+                          <SidebarAgentNode key={a.runId} agent={a} onDismiss={() => removeAgent(a.runId)} />
+                        ))}
+                      </SidebarMenuSub>
+                    )}
                   </SidebarMenuItem>
                 );
               })}
@@ -143,5 +159,40 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss: () => void }) {
+  const failed = agent.lifecycle === 'failed';
+  const label = AgentRunKindLabel[agent.kind] ?? 'Agent';
+  const Icon = failed ? AlertCircle : Loader2;
+  const exitSuffix = failed && agent.exitCode !== null ? ` (exit ${agent.exitCode})` : '';
+
+  return (
+    <SidebarMenuSubItem>
+      <NavLink to={`/workitems/${agent.workItemId}?runId=${agent.runId}`} className="flex-1 min-w-0">
+        <SidebarMenuSubButton title={`${label} — ${agent.workItemTitle}\n${agent.statusLine}${exitSuffix}`}>
+          <Icon className={`h-3 w-3 shrink-0 ${failed ? 'text-destructive' : 'animate-spin opacity-60'}`} />
+          <div className="flex flex-col items-start min-w-0 leading-tight">
+            <span className="truncate text-[12px]">
+              {label} {agent.workItemExternalId ? `#${agent.workItemExternalId}` : ''}
+            </span>
+            <span className="truncate text-[10px] text-muted-foreground max-w-[10rem]">
+              {failed ? `failed${exitSuffix}` : agent.statusLine}
+            </span>
+          </div>
+        </SidebarMenuSubButton>
+      </NavLink>
+      {failed && (
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDismiss(); }}
+          className="absolute right-1 top-1 rounded p-0.5 text-muted-foreground hover:bg-accent"
+          title="Dismiss"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </SidebarMenuSubItem>
   );
 }

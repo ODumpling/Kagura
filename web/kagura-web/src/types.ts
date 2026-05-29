@@ -188,6 +188,22 @@ export enum AgentRunKind {
   TaskAgent = 0,
   Triage = 1,
   AutoReview = 2,
+  Grill = 3,
+  MergeResolver = 4,
+}
+
+/// Sidebar tree event payload — emitted over SignalR `agentAppeared` and read by the
+/// SidebarAgentsTree component. Mirrors `Kagura.Core.Agents.AgentSidebarEvent`.
+export interface AgentSidebarEventDto {
+  runId: string;
+  workItemId: string;
+  sourceId: string;
+  sourceName: string;
+  workItemTitle: string;
+  workItemExternalId: string;
+  kind: AgentRunKind;
+  statusLine: string;
+  startedAt: string;
 }
 
 export interface AgentRunDto {
@@ -208,6 +224,8 @@ export const AgentRunKindLabel: Record<AgentRunKind, string> = {
   [AgentRunKind.TaskAgent]: 'Agent',
   [AgentRunKind.Triage]: 'Triage',
   [AgentRunKind.AutoReview]: 'Review',
+  [AgentRunKind.Grill]: 'Grill',
+  [AgentRunKind.MergeResolver]: 'Merge',
 };
 
 export interface FinishWorkItemResult {
