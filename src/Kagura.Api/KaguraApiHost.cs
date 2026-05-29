@@ -4,6 +4,7 @@ using Kagura.Api.Hubs;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
 using Kagura.Core.Grill;
+using Kagura.Core.Interactive;
 using Kagura.Core.Merge;
 using Kagura.Core.Review;
 using Kagura.Core.Sources;
@@ -133,6 +134,7 @@ public static class KaguraApiHost
             MaxRunDuration = devflow.GetValue<TimeSpan?>("MaxRunDuration") ?? TimeSpan.FromMinutes(30),
         });
         builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
+        builder.Services.AddSingleton<IInteractivePromptService, InteractivePromptService>();
         builder.Services.AddSingleton<IAgentRunner, AgentRunner>();
         builder.Services.AddScoped<IAgentRunSink, AgentRunSink>();
 

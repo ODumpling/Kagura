@@ -2,6 +2,7 @@ using Kagura.Api.HostedServices;
 using Kagura.Core.Agents;
 using Kagura.Core.Domain;
 using Kagura.Core.Git;
+using Kagura.Core.Interactive;
 using Kagura.Core.Merge;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -24,6 +25,7 @@ internal sealed class CapturingBroadcaster : IAgentBroadcaster
     public Task DataAsync(Guid runId, byte[] data) => Task.CompletedTask;
     public Task ExitAsync(Guid runId, int? exitCode) => Task.CompletedTask;
     public Task WorkItemUpdatedAsync(Guid workItemId) { WorkItemUpdates.Add(workItemId); return Task.CompletedTask; }
+    public Task PromptAsync(InteractivePrompt prompt) => Task.CompletedTask;
 }
 
 public class RalphLoopDriverTests
