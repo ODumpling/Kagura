@@ -14,7 +14,7 @@ public partial class MarkdownIssueProvider : IIssueProvider
     {
         var cfg = JsonSerializer.Deserialize<MarkdownConfig>(source.ConfigJson, JsonOpts);
         var issuesPath = string.IsNullOrWhiteSpace(cfg?.IssuesPath)
-            ? Path.Combine(source.LocalRepoPath, ".devflow", "issues")
+            ? Path.Combine(source.LocalRepoPath, ".kagura", "issues")
             : cfg!.IssuesPath;
 
         var issuesDir = Path.IsPathRooted(issuesPath)

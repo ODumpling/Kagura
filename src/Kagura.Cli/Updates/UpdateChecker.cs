@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Kagura.Core;
 
 namespace Kagura.Cli.Updates;
 
@@ -113,10 +114,9 @@ internal static class UpdateChecker
 
     private static string GetCachePath()
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var preferred = Path.Combine(home, ".kagura");
-        var legacy = Path.Combine(home, ".devflow");
-        var dir = Directory.Exists(preferred) || !Directory.Exists(legacy) ? preferred : legacy;
+        var dir = Directory.Exists(KaguraPaths.LegacyRoot) && !Directory.Exists(KaguraPaths.Root)
+            ? KaguraPaths.LegacyRoot
+            : KaguraPaths.Root;
         Directory.CreateDirectory(dir);
         return Path.Combine(dir, "update-check.json");
     }

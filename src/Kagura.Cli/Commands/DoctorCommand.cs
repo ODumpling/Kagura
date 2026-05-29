@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
+using Kagura.Core;
 using Kagura.Data;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -98,7 +99,11 @@ internal static class DoctorCommand
 
     private static void CheckStateDirectoryWritable(Report report)
     {
-        var dir = KaguraPaths.StateDirectory;
+        // Prefer ~/.kagura/; fall back to ~/.devflow/ on boxes whose server hasn't yet
+        // run the one-shot migration so `doctor` stays useful pre-first-run.
+        var dir = Directory.Exists(KaguraPaths.LegacyRoot) && !Directory.Exists(KaguraPaths.Root)
+            ? KaguraPaths.LegacyRoot
+            : KaguraPaths.Root;
         try
         {
             Directory.CreateDirectory(dir);
@@ -134,10 +139,12 @@ internal static class DoctorCommand
 
     private static async Task CheckDatabaseAsync(Report report)
     {
-        var dbPath = KaguraPaths.DatabasePath;
+        string? dbPath = File.Exists(KaguraPaths.DbPath) ? KaguraPaths.DbPath
+                       : File.Exists(KaguraPaths.LegacyDbPath) ? KaguraPaths.LegacyDbPath
+                       : null;
         if (dbPath is null)
         {
-            report.Fail("database", $"no kagura.db at {KaguraPaths.PreferredDatabasePath} (or legacy {KaguraPaths.LegacyDatabasePath}); run `kagura run` once to create it");
+            report.Fail("database", $"no kagura.db at {KaguraPaths.DbPath} (or legacy {KaguraPaths.LegacyDbPath}); run `kagura run` once to create it");
             return;
         }
 
@@ -235,33 +242,6 @@ internal static class DoctorCommand
         {
             AllOk = false;
             Console.Error.WriteLine($"FAIL {name}: {detail}");
-        }
-    }
-}
-
-internal static class KaguraPaths
-{
-    public static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-    // Today the code writes to ~/.devflow/. #23 renames it to ~/.kagura/. We prefer ~/.kagura/
-    // (matches the spec) but fall back to ~/.devflow/ so `doctor` is useful on existing dev boxes.
-    public static string PreferredDirectory => Path.Combine(Home, ".kagura");
-    public static string LegacyDirectory => Path.Combine(Home, ".devflow");
-
-    public static string StateDirectory => Directory.Exists(LegacyDirectory) && !Directory.Exists(PreferredDirectory)
-        ? LegacyDirectory
-        : PreferredDirectory;
-
-    public static string PreferredDatabasePath => Path.Combine(PreferredDirectory, "kagura.db");
-    public static string LegacyDatabasePath => Path.Combine(LegacyDirectory, "kagura.db");
-
-    public static string? DatabasePath
-    {
-        get
-        {
-            if (File.Exists(PreferredDatabasePath)) return PreferredDatabasePath;
-            if (File.Exists(LegacyDatabasePath)) return LegacyDatabasePath;
-            return null;
         }
     }
 }

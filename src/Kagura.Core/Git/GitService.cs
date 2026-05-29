@@ -37,7 +37,7 @@ public partial class GitService
     private readonly ILogger<GitService> _log;
 
     public GitService(string worktreesRoot, IMergeConflictResolver resolver, ILogger<GitService> log)
-        : this(worktreesRoot, scratchRoot: "~/.devflow/scratch", resolver, log, mergeKickoff: null)
+        : this(worktreesRoot, scratchRoot: KaguraPaths.ScratchRoot, resolver, log, mergeKickoff: null)
     {
     }
 
@@ -72,7 +72,7 @@ public partial class GitService
     }
 
     public string WorkItemBranchName(WorkItem wi) =>
-        $"devflow/{Slug(wi.ExternalId)}-{Slug(wi.Title, 30)}";
+        $"kagura/{Slug(wi.ExternalId)}-{Slug(wi.Title, 30)}";
 
     // Use `--` (not `/`) so task branches are siblings of the work-item branch.
     // Git forbids both `foo` and `foo/bar` existing as refs.
@@ -88,7 +88,7 @@ public partial class GitService
 
     /// <summary>
     /// Path to the long-lived scratch worktree for a Source. Per CONTEXT.md → "Agent working
-    /// directory": one per-Source worktree at <c>~/.devflow/scratch/&lt;source&gt;/</c> on a
+    /// directory": one per-Source worktree at <c>~/.kagura/scratch/&lt;source&gt;/</c> on a
     /// detached HEAD at the default branch. Used by Triage and Grill Agents so they don't
     /// touch the user's working copy.
     /// </summary>

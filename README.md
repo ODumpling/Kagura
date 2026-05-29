@@ -1,6 +1,6 @@
 # Kagura
 
-A local devflow app that pulls issues from your trackers (GitHub, Azure DevOps, Beads, Markdown), triages each into smaller tasks via Claude, and runs them in parallel as real, attachable `claude` CLI sessions inside isolated git worktrees.
+A local orchestrator that pulls issues from your trackers (GitHub, Azure DevOps, Beads, Markdown), triages each into smaller tasks via Claude, and runs them in parallel as real, attachable `claude` CLI sessions inside isolated git worktrees.
 
 Single-user, local-only. No auth. Built for one developer's workstation.
 
@@ -31,13 +31,15 @@ Open a PR with your changes — the docs site rebuilds and redeploys from `main`
                                      └──────────────────────────────────┘
                                                   │
                                                   ▼
-                                       ~/.devflow/kagura.db
-                                       ~/.devflow/keys/        (DPAPI/DataProtection)
-                                       ~/.devflow/worktrees/<wi>/<task>/
-                                       ~/.devflow/transcripts/
+                                       ~/.kagura/kagura.db
+                                       ~/.kagura/keys/        (DPAPI/DataProtection)
+                                       ~/.kagura/worktrees/<wi>/<task>/
+                                       ~/.kagura/transcripts/
 ```
 
-Per work item: a branch `devflow/<external-id>-<slug>` is cut from the repo's default branch. Each approved task gets a child branch `devflow/.../<order>-<slug>` and a worktree. A `claude` PTY runs in that worktree; its bytes stream over SignalR to an xterm.js tab the user can type into. When all tasks merge up, the work-item branch becomes a PR.
+Per work item: a branch `kagura/<external-id>-<slug>` is cut from the repo's default branch. Each approved task gets a child branch `kagura/.../<order>-<slug>` and a worktree. A `claude` PTY runs in that worktree; its bytes stream over SignalR to an xterm.js tab the user can type into. When all tasks merge up, the work-item branch becomes a PR.
+
+> Migrating from an older install? On first run Kagura moves `~/.devflow/` → `~/.kagura/` automatically. Any `Devflow:` overrides in `appsettings.json` should be renamed to `Kagura:`.
 
 ## Install
 
@@ -73,7 +75,7 @@ kagura run
 # → Kagura running at http://localhost:5253/
 ```
 
-Open that URL — the React UI loads served by the same Kestrel server. On first run, Kagura creates `~/.devflow/` (database, encryption keys, worktrees, transcripts) and prints a one-time banner letting you know.
+Open that URL — the React UI loads served by the same Kestrel server. On first run, Kagura creates `~/.kagura/` (database, encryption keys, worktrees, transcripts) and prints a one-time banner letting you know.
 
 ## Subcommands
 
@@ -90,10 +92,10 @@ Open that URL — the React UI loads served by the same Kestrel server. On first
 dotnet tool uninstall -g Kagura.Cli
 ```
 
-That removes the binary. `~/.devflow/` is **left behind** so reinstalling resumes where you left off. To fully remove Kagura, also delete its state directory:
+That removes the binary. `~/.kagura/` is **left behind** so reinstalling resumes where you left off. To fully remove Kagura, also delete its state directory:
 
 ```bash
-rm -rf ~/.devflow
+rm -rf ~/.kagura
 ```
 
 `dotnet tool` has no post-uninstall hook, which is why this last step has to be manual.
@@ -109,7 +111,7 @@ The `claude` CLI you've already installed is what talks to Anthropic — Kagura 
 In the UI:
 
 1. **Sources** → Add a source pointing at a local repo clone.
-2. Click **Sync** — Markdown sources scan `<repo>/.devflow/issues/*.md`. Each `.md` becomes a WorkItem.
+2. Click **Sync** — Markdown sources scan `<repo>/.kagura/issues/*.md`. Each `.md` becomes a WorkItem.
 3. **Work items** → open one → **Triage** (calls Claude, proposes tasks) → **Approve all**.
 4. **Start agent** on a task → a terminal tab opens, attached to a live `claude` running in that task's worktree. Type into it normally.
 
@@ -135,12 +137,11 @@ If `id` is missing, the filename (without `.md`) is used.
 
 ```jsonc
 {
-  "Devflow": {
+  "Kagura": {
     "MaxConcurrentAgents": 3,             // SemaphoreSlim cap on parallel claude PTYs
-    "WorktreesRoot": "~/.devflow/worktrees",
-    "DbPath": "~/.devflow/kagura.db",
-    "ClaudeBinary": "claude",             // anything resolvable on $PATH
-    "TranscriptsRoot": "~/.devflow/transcripts"
+    "ClaudeBinary": "claude"              // anything resolvable on $PATH
+    // WorktreesRoot / DbPath / TranscriptsRoot / ScratchRoot default to ~/.kagura/*
+    // — override them here if you want a different "profile".
   },
   "Triage": {
     "Model": null                         // optional; passes --model to `claude -p` when set
@@ -148,7 +149,7 @@ If `id` is missing, the filename (without `.md`) is used.
 }
 ```
 
-Sources themselves (GitHub tokens, ADO PATs, Markdown paths, etc.) live in the **DB**, not in config. The whole `ConfigJson` column is encrypted with `Microsoft.AspNetCore.DataProtection` (keys under `~/.devflow/keys/`).
+Sources themselves (GitHub tokens, ADO PATs, Markdown paths, etc.) live in the **DB**, not in config. The whole `ConfigJson` column is encrypted with `Microsoft.AspNetCore.DataProtection` (keys under `~/.kagura/keys/`).
 
 ## Project layout
 
@@ -232,7 +233,7 @@ dotnet run --project src/Kagura.AppHost
 # → Aspire dashboard prints its own URL on startup
 # → API at http://localhost:5253
 # → Web at http://localhost:5173 (Vite HMR)
-# → DB + DataProtection keys auto-created under ~/.devflow/
+# → DB + DataProtection keys auto-created under ~/.kagura/
 ```
 
 To run pieces individually without Aspire: `dotnet watch --project src/Kagura.Api` and, in another terminal, `npm --prefix web/kagura-web run dev`.
@@ -299,20 +300,20 @@ A "Finish work item" endpoint that walks `task.Status == Merged`, then opens the
 
 | Path | What |
 |---|---|
-| `~/.devflow/kagura.db` | SQLite, all entities |
-| `~/.devflow/keys/` | DataProtection master keys (do not commit, do not share) |
-| `~/.devflow/worktrees/<wi-slug>/<task-slug>/` | Per-task git worktree where `claude` runs |
-| `~/.devflow/transcripts/<wi-id>/<task-id>_<run-id>.log` | Raw PTY transcript for replay on reconnect |
+| `~/.kagura/kagura.db` | SQLite, all entities |
+| `~/.kagura/keys/` | DataProtection master keys (do not commit, do not share) |
+| `~/.kagura/worktrees/<wi-slug>/<task-slug>/` | Per-task git worktree where `claude` runs |
+| `~/.kagura/transcripts/<wi-id>/<task-id>_<run-id>.log` | Raw PTY transcript for replay on reconnect |
 
 The DB path, worktree root, and transcript root are all overridable in `appsettings.json`. Move them all together if you want a different "profile."
 
 ### Resetting
 
-The app is stateless beyond `~/.devflow/`. To start over:
+The app is stateless beyond `~/.kagura/`. To start over:
 
 ```bash
 # nuke local state (will lose all sources, work items, transcripts, encryption keys)
-rm -rf ~/.devflow
+rm -rf ~/.kagura
 ```
 
 Worktrees registered with git but missing on disk can be cleaned with `git worktree prune` inside the source repo.

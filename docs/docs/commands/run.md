@@ -16,7 +16,7 @@ kagura run
 # → Kagura running at http://localhost:5253/
 ```
 
-On first boot Kagura creates the `~/.devflow/` state directory (database,
+On first boot Kagura creates the `~/.kagura/` state directory (database,
 encryption keys, worktrees, transcripts) and prints a one-time banner
 pointing at it. There is no daemon — the process runs in the foreground
 and Ctrl-C stops it cleanly.

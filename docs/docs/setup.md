@@ -41,7 +41,7 @@ kagura run
 # → Kagura running at http://localhost:5253/
 ```
 
-Open that URL in your browser — the React UI loads served by the same Kestrel server. On first run, Kagura creates `~/.devflow/` (database, encryption keys, worktrees, transcripts) and prints a one-time banner letting you know.
+Open that URL in your browser — the React UI loads served by the same Kestrel server. On first run, Kagura creates `~/.kagura/` (database, encryption keys, worktrees, transcripts) and prints a one-time banner letting you know.
 
 ### Subcommands
 
@@ -60,10 +60,10 @@ variables, and behaviour notes:
 dotnet tool uninstall -g Kagura.Cli
 ```
 
-That removes the binary. `~/.devflow/` is **left behind** so reinstalling resumes where you left off. To fully remove Kagura, also delete its state directory:
+That removes the binary. `~/.kagura/` is **left behind** so reinstalling resumes where you left off. To fully remove Kagura, also delete its state directory:
 
 ```bash
-rm -rf ~/.devflow
+rm -rf ~/.kagura
 ```
 
 `dotnet tool` has no post-uninstall hook, which is why this last step has to be manual.

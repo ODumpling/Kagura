@@ -2,6 +2,7 @@ using Kagura.Api.Endpoints;
 using Kagura.Api.HostedServices;
 using Kagura.Api.Hubs;
 using Kagura.Api.Services;
+using Kagura.Core;
 using Kagura.Core.Agents;
 using Kagura.Core.Agents.Mcp;
 using Kagura.Core.Git;
@@ -64,8 +65,17 @@ public static class KaguraApiHost
 
         builder.AddServiceDefaults();
 
-        var devflow = builder.Configuration.GetSection("Devflow");
-        var dbPath = ResolvePath(devflow["DbPath"] ?? "~/.devflow/kagura.db");
+        var kagura = builder.Configuration.GetSection("Kagura");
+
+        // One-shot move of ~/.devflow/ → ~/.kagura/ for boxes that predate the rename.
+        // Must run before any directory access below or we'd create an empty ~/.kagura/
+        // and skip the move.
+        if (KaguraPaths.MigrateLegacyIfPresent())
+        {
+            Console.WriteLine($"Migrated {DisplayPath(KaguraPaths.LegacyRoot)} → {DisplayPath(KaguraPaths.Root)}");
+        }
+
+        var dbPath = ResolvePath(kagura["DbPath"] ?? KaguraPaths.DbPath);
         var stateDir = Path.GetDirectoryName(dbPath)!;
         var firstRun = !Directory.Exists(stateDir);
         if (firstRun)
@@ -80,7 +90,7 @@ public static class KaguraApiHost
 
         builder.Services.AddDataProtection()
             .SetApplicationName("Kagura")
-            .PersistKeysToFileSystem(new DirectoryInfo(ResolvePath("~/.devflow/keys")));
+            .PersistKeysToFileSystem(new DirectoryInfo(KaguraPaths.KeysDir));
 
         builder.Services.AddDbContext<KaguraDbContext>(opt => opt.UseSqlite($"Data Source={dbPath}"));
 
@@ -94,7 +104,7 @@ public static class KaguraApiHost
 
         builder.Services.Configure<TriageOptions>(opt =>
         {
-            opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+            opt.ClaudeBinary = kagura["ClaudeBinary"] ?? "claude";
             opt.Model = builder.Configuration["Triage:Model"];
         });
         builder.Services.AddScoped<ITriageService, ClaudeCliTriageService>();
@@ -105,7 +115,7 @@ public static class KaguraApiHost
 
         builder.Services.Configure<ReviewOptions>(opt =>
         {
-            opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+            opt.ClaudeBinary = kagura["ClaudeBinary"] ?? "claude";
             opt.Model = builder.Configuration["Review:Model"];
         });
         // AutoReviewAgentContext is singleton (like MergeResolverAgentContext) because it
@@ -119,7 +129,7 @@ public static class KaguraApiHost
 
         builder.Services.Configure<GrillOptions>(opt =>
         {
-            opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+            opt.ClaudeBinary = kagura["ClaudeBinary"] ?? "claude";
             opt.Model = builder.Configuration["Grill:Model"];
         });
         builder.Services.AddScoped<IGrillService, ClaudeCliGrillService>();
@@ -127,7 +137,7 @@ public static class KaguraApiHost
 
         builder.Services.Configure<MergeResolverOptions>(opt =>
         {
-            opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
+            opt.ClaudeBinary = kagura["ClaudeBinary"] ?? "claude";
             opt.Model = builder.Configuration["MergeResolver:Model"];
         });
         builder.Services.AddSingleton<MergeResolverAgentContext>();
@@ -138,8 +148,8 @@ public static class KaguraApiHost
         builder.Services.AddSingleton<IMergeResolverKickoff, MergeResolverKickoffService>();
 
         builder.Services.AddSingleton(sp =>
-            new GitService(devflow["WorktreesRoot"] ?? "~/.devflow/worktrees",
-                scratchRoot: devflow["ScratchRoot"] ?? "~/.devflow/scratch",
+            new GitService(kagura["WorktreesRoot"] ?? KaguraPaths.WorktreesRoot,
+                scratchRoot: kagura["ScratchRoot"] ?? KaguraPaths.ScratchRoot,
                 sp.GetRequiredService<IMergeConflictResolver>(),
                 sp.GetRequiredService<ILogger<GitService>>(),
                 sp.GetRequiredService<IMergeResolverKickoff>()));
@@ -147,12 +157,12 @@ public static class KaguraApiHost
         builder.Services.AddSingleton<IPrPreviewService, GitPrPreviewService>();
         builder.Services.AddSingleton(new AgentRunnerOptions
         {
-            MaxConcurrentAgents = devflow.GetValue<int?>("MaxConcurrentAgents") ?? 3,
-            ClaudeBinary = devflow["ClaudeBinary"] ?? "claude",
-            TranscriptsRoot = devflow["TranscriptsRoot"] ?? "~/.devflow/transcripts",
-            ApiBaseUrl = devflow["ApiBaseUrl"] ?? "http://localhost:5253",
-            PromptTemplate = devflow["PromptTemplate"] ?? AgentRunnerOptions.DefaultPromptTemplate,
-            MaxRunDuration = devflow.GetValue<TimeSpan?>("MaxRunDuration") ?? TimeSpan.FromMinutes(30),
+            MaxConcurrentAgents = kagura.GetValue<int?>("MaxConcurrentAgents") ?? 3,
+            ClaudeBinary = kagura["ClaudeBinary"] ?? "claude",
+            TranscriptsRoot = kagura["TranscriptsRoot"] ?? KaguraPaths.TranscriptsRoot,
+            ApiBaseUrl = kagura["ApiBaseUrl"] ?? "http://localhost:5253",
+            PromptTemplate = kagura["PromptTemplate"] ?? AgentRunnerOptions.DefaultPromptTemplate,
+            MaxRunDuration = kagura.GetValue<TimeSpan?>("MaxRunDuration") ?? TimeSpan.FromMinutes(30),
         });
         builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
         builder.Services.AddSingleton<IInteractivePromptService, InteractivePromptService>();
@@ -163,16 +173,16 @@ public static class KaguraApiHost
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton(new WorkItemCleanupOptions
         {
-            Interval = devflow.GetValue<TimeSpan?>("WorkItemCleanup:Interval") ?? TimeSpan.FromHours(1),
-            Retention = devflow.GetValue<TimeSpan?>("WorkItemCleanup:Retention") ?? TimeSpan.FromDays(7),
+            Interval = kagura.GetValue<TimeSpan?>("WorkItemCleanup:Interval") ?? TimeSpan.FromHours(1),
+            Retention = kagura.GetValue<TimeSpan?>("WorkItemCleanup:Retention") ?? TimeSpan.FromDays(7),
         });
         builder.Services.AddHostedService<WorkItemCleanupService>();
 
         builder.Services.AddSingleton(new RalphLoopOptions
         {
-            TickInterval = devflow.GetValue<TimeSpan?>("RalphLoop:TickInterval") ?? TimeSpan.FromSeconds(5),
-            MaxRetryAttempts = devflow.GetValue<int?>("RalphLoop:MaxRetryAttempts") ?? 3,
-            MaxConcurrentTasksPerWorkItem = devflow.GetValue<int?>("RalphLoop:MaxConcurrentTasksPerWorkItem") ?? 3,
+            TickInterval = kagura.GetValue<TimeSpan?>("RalphLoop:TickInterval") ?? TimeSpan.FromSeconds(5),
+            MaxRetryAttempts = kagura.GetValue<int?>("RalphLoop:MaxRetryAttempts") ?? 3,
+            MaxConcurrentTasksPerWorkItem = kagura.GetValue<int?>("RalphLoop:MaxConcurrentTasksPerWorkItem") ?? 3,
         });
         builder.Services.AddScoped<ITriageKickoffService, TriageKickoffService>();
         builder.Services.AddScoped<IAutoReviewKickoffService, AutoReviewKickoffService>();

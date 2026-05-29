@@ -34,10 +34,10 @@ Sources, WorkItems, and Agents form the hierarchy: `Source → WorkItem → Agen
 
 Where an Agent's PTY runs determines what context it has when the user attaches and steers it. Policy per Role:
 
-- **Task** — its own worktree under `~/.devflow/worktrees/<wi>/<task>/` on the task branch.
+- **Task** — its own worktree under `~/.kagura/worktrees/<wi>/<task>/` on the task branch.
 - **MergeResolver** — the work-item's merge worktree (`WorkItemMergeWorktreePath`).
 - **AutoReview** — the work-item's merge worktree (where the merged diff is).
-- **Triage**, **Grill** — the **Source's scratch worktree** at `~/.devflow/scratch/<source>/`. One long-lived worktree per Source, on a detached HEAD at the default branch. Refreshed (`git fetch && git reset --hard origin/<default>`) before each Agent spawn so the snapshot is current. Survives across Agent runs; pruned when the Source is deleted.
+- **Triage**, **Grill** — the **Source's scratch worktree** at `~/.kagura/scratch/<source>/`. One long-lived worktree per Source, on a detached HEAD at the default branch. Refreshed (`git fetch && git reset --hard origin/<default>`) before each Agent spawn so the snapshot is current. Survives across Agent runs; pruned when the Source is deleted.
 
 The scratch worktree keeps Triage and Grill out of the user's real working copy. Detached HEAD makes "do not create branches" a stronger hint than a prompt instruction alone. Triage/Grill are still **read-only by convention** — the cwd is a real git checkout, just not the user's own.
 

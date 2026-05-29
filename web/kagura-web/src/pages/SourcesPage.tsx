@@ -27,7 +27,7 @@ const blankSource = (): UpsertSource => ({
 
 function defaultConfigFor(type: SourceType): Record<string, unknown> {
   switch (type) {
-    case SourceType.Markdown: return { issuesPath: '.devflow/issues' };
+    case SourceType.Markdown: return { issuesPath: '.kagura/issues' };
     case SourceType.GitHub: return { url: '', token: '', labels: '' };
     case SourceType.AzureDevOps: return { organization: '', project: '', pat: '', query: '' };
     case SourceType.Beads: return { status: '' };
@@ -71,7 +71,7 @@ function ConfigFields({
           label="Issues folder"
           hint="Folder of .md files, relative to the repo root (or an absolute path)."
         >
-          <Input id="cfg-issuesPath" placeholder=".devflow/issues" value={str('issuesPath')}
+          <Input id="cfg-issuesPath" placeholder=".kagura/issues" value={str('issuesPath')}
             onChange={e => set('issuesPath', e.target.value)} />
         </Field>
       );

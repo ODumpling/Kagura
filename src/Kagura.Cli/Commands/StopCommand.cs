@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Kagura.Core;
 
 namespace Kagura.Cli.Commands;
 
@@ -108,8 +109,8 @@ internal static class StopCommand
         // wrote to ~/.devflow (legacy) or ~/.kagura (preferred).
         var roots = new[]
         {
-            Path.Combine(KaguraPaths.PreferredDirectory, "runtime"),
-            Path.Combine(KaguraPaths.LegacyDirectory, "runtime"),
+            KaguraPaths.RuntimeDir,
+            KaguraPaths.LegacyRuntimeDir,
         };
         var results = new List<string>();
         foreach (var root in roots)

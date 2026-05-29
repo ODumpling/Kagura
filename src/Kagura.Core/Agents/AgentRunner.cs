@@ -13,7 +13,7 @@ public class AgentRunnerOptions
 {
     public int MaxConcurrentAgents { get; set; } = 3;
     public string ClaudeBinary { get; set; } = "claude";
-    public string TranscriptsRoot { get; set; } = "~/.devflow/transcripts";
+    public string TranscriptsRoot { get; set; } = KaguraPaths.TranscriptsRoot;
     public string ApiBaseUrl { get; set; } = "http://localhost:5253";
     public string PromptTemplate { get; set; } = DefaultPromptTemplate;
 

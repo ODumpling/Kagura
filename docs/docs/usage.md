@@ -65,7 +65,7 @@ hood, so the call takes a few seconds.
    - Hand the whole pipeline over to **Ralph Loop** (see below).
 
 After triage the work item's status moves from `New` → `Triaged`, and the
-work-item branch `devflow/<external-id>-<slug>` is created off the repo's
+work-item branch `kagura/<external-id>-<slug>` is created off the repo's
 default branch.
 
 ## Closed work items
@@ -140,4 +140,4 @@ human.
 - The [Setup guide](./setup.md) covers installing prerequisites, adding a
   source, and the markdown issue format.
 - The project [`README.md`](https://github.com/ODumpling/Kagura/blob/main/README.md)
-  has the REST API reference and the on-disk layout under `~/.devflow/`.
+  has the REST API reference and the on-disk layout under `~/.kagura/`.
