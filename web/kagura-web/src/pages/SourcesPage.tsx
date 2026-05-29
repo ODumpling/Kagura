@@ -22,6 +22,7 @@ const blankSource = (): UpsertSource => ({
   localRepoPath: '',
   config: defaultConfigFor(SourceType.Markdown),
   enabled: true,
+  autoTriageOnImport: false,
 });
 
 function defaultConfigFor(type: SourceType): Record<string, unknown> {
@@ -213,7 +214,14 @@ export function SourcesPage() {
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => setEditing({
                       id: s.id,
-                      draft: { name: s.name, type: s.type, localRepoPath: s.localRepoPath, config: s.config, enabled: s.enabled },
+                      draft: {
+                        name: s.name,
+                        type: s.type,
+                        localRepoPath: s.localRepoPath,
+                        config: s.config,
+                        enabled: s.enabled,
+                        autoTriageOnImport: s.autoTriageOnImport,
+                      },
                     })}>Edit</Button>
                     <Button variant="ghost" size="sm" onClick={() => remove(s.id)} className="text-destructive">
                       <Trash2 />
@@ -297,6 +305,17 @@ export function SourcesPage() {
                 </div>
                 <Switch id="enabled" checked={editing.draft.enabled}
                   onCheckedChange={(checked) => setEditing({ ...editing, draft: { ...editing.draft, enabled: checked } })} />
+              </div>
+
+              <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="autoTriageOnImport" className="cursor-pointer">Auto-triage new items on import</Label>
+                  <p className="text-xs text-muted-foreground">
+                    When sync imports a new work item, immediately spawn a Triage Agent for it.
+                  </p>
+                </div>
+                <Switch id="autoTriageOnImport" checked={editing.draft.autoTriageOnImport}
+                  onCheckedChange={(checked) => setEditing({ ...editing, draft: { ...editing.draft, autoTriageOnImport: checked } })} />
               </div>
             </div>
           )}
