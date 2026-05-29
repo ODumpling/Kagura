@@ -180,11 +180,17 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
   const Icon = failed ? AlertCircle : style.Icon;
   const iconClass = failed ? 'text-destructive' : style.className;
   const exitSuffix = failed && agent.exitCode !== null ? ` (exit ${agent.exitCode})` : '';
+  // TaskAgent rows deep-link to the task detail page so users land on the focused
+  // view (title, status, branch/worktree, live terminal). Other roles still drop
+  // the user on the work item.
+  const href = agent.kind === AgentRunKind.TaskAgent && agent.taskId
+    ? `/workitems/${agent.workItemId}/tasks/${agent.taskId}?runId=${agent.runId}`
+    : `/workitems/${agent.workItemId}?runId=${agent.runId}`;
 
   return (
     <SidebarMenuSubItem>
       <SidebarMenuSubButton asChild title={`${label} — ${agent.workItemTitle}\n${agent.statusLine}${exitSuffix}`}>
-        <NavLink to={`/workitems/${agent.workItemId}?runId=${agent.runId}`} className="flex-1 min-w-0">
+        <NavLink to={href} className="flex-1 min-w-0">
           <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
           <div className="flex flex-col items-start min-w-0 leading-tight">
             <span className="truncate text-[12px]">

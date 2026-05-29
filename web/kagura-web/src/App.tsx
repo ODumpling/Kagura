@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { SourcesPage } from '@/pages/SourcesPage';
 import { WorkItemsPage } from '@/pages/WorkItemsPage';
 import { WorkItemDetailPage } from '@/pages/WorkItemDetailPage';
+import { TaskDetailPage } from '@/pages/TaskDetailPage';
 import { AgentsPage } from '@/pages/AgentsPage';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Separator } from '@/components/ui/separator';
@@ -26,6 +27,7 @@ function AppMain() {
         <Route path="/sources" element={<SourcesPage />} />
         <Route path="/workitems" element={<WorkItemsPage />} />
         <Route path="/workitems/:id" element={<WorkItemDetailPage />} />
+        <Route path="/workitems/:workItemId/tasks/:taskId" element={<TaskDetailPage />} />
         <Route path="/agents" element={<AgentsPage />} />
       </Routes>
     </main>
