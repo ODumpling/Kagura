@@ -19,7 +19,7 @@ import './App.css';
 
 function AppMain() {
   const location = useLocation();
-  const fullWidth = location.pathname.startsWith('/agents');
+  const fullWidth = location.pathname.startsWith('/agents') || location.pathname.startsWith('/prompts');
   const mainClass = `flex flex-1 flex-col p-6 w-full min-h-0${fullWidth ? '' : ' max-w-[1400px]'}`;
   return (
     <main className={mainClass}>
