@@ -16,7 +16,9 @@ public sealed record AgentSidebarEvent(
     string WorkItemExternalId,
     Kagura.Core.Domain.AgentRunKind Kind,
     string StatusLine,
-    DateTime StartedAt);
+    DateTime StartedAt,
+    Guid? TaskId = null,
+    string? TaskTitle = null);
 
 public interface IAgentBroadcaster
 {

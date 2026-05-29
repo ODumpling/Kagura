@@ -48,6 +48,8 @@ public class SignalRAgentBroadcaster : IAgentBroadcaster
             kind = (int)evt.Kind,
             statusLine = evt.StatusLine,
             startedAt = evt.StartedAt,
+            taskId = evt.TaskId?.ToString(),
+            taskTitle = evt.TaskTitle,
         });
 
     public Task AgentDismissedAsync(Guid runId) =>

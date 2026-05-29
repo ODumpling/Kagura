@@ -197,6 +197,19 @@ public class AgentRunner : IAgentRunner
                 Cleanup(runId);
             };
 
+            await _broadcaster.AgentAppearedAsync(new AgentSidebarEvent(
+                RunId: runId,
+                WorkItemId: wi.Id,
+                SourceId: wi.SourceId,
+                SourceName: wi.Source?.Name ?? "",
+                WorkItemTitle: wi.Title,
+                WorkItemExternalId: wi.ExternalId,
+                Kind: AgentRunKind.TaskAgent,
+                StatusLine: "Task — running",
+                StartedAt: session.StartedAt,
+                TaskId: task.Id,
+                TaskTitle: task.Title));
+
             _log.LogInformation("Started agent run {RunId} for task {TaskId} in {Cwd}", runId, task.Id, worktreePath);
             return session;
         }
