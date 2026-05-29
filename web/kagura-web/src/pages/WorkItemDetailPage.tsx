@@ -284,12 +284,18 @@ export function WorkItemDetailPage() {
   const ralphWaiting = ralphActive && !item.ralphLoopHaltReason && !!item.ralphLoopWaitingReason;
   const ralphWorking = ralphActive && !item.ralphLoopHaltReason && !item.ralphLoopWaitingReason;
   const allMerged = item.tasks.length > 0 && item.tasks.every(t => t.status === AgentTaskStatus.Merged);
+  const isTerminalForRalph =
+    item.status === WorkItemStatus.PullRequested ||
+    item.status === WorkItemStatus.Cancelled ||
+    item.status === WorkItemStatus.Closed ||
+    item.status === WorkItemStatus.Done;
   const canShowRalph =
-    !isClosed &&
-    item.status !== WorkItemStatus.PullRequested &&
-    item.tasks.length > 0 &&
+    !isTerminalForRalph &&
     !allMerged &&
-    (item.status === WorkItemStatus.Triaged || item.status === WorkItemStatus.InProgress);
+    item.grillStatus !== GrillStatus.Active &&
+    (item.status === WorkItemStatus.New ||
+      item.status === WorkItemStatus.Triaged ||
+      item.status === WorkItemStatus.InProgress);
   const ralphConfig: RalphLoopConfig = {
     autoApproveTriage: item.autoApproveTriage,
     autoReviewEnabled: item.autoReviewEnabled,
