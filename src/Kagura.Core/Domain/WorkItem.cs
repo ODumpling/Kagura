@@ -63,5 +63,12 @@ public class WorkItem
         Status = WorkItemStatus.Closed;
         ClosedAt ??= stamp;
         UpdatedAt = stamp;
+
+        if (RalphLoopActive)
+        {
+            RalphLoopActive = false;
+            RalphLoopHaltReason = "Upstream issue closed during Ralph run";
+        }
+        RalphLoopWaitingReason = null;
     }
 }

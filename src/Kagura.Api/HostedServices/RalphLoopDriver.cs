@@ -1,6 +1,8 @@
+using Kagura.Api.Services;
 using Kagura.Core.Agents;
 using Kagura.Core.Domain;
 using Kagura.Core.Git;
+using Kagura.Core.Interactive;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,12 +12,17 @@ namespace Kagura.Api.HostedServices;
 // driven by RalphLoopService on a 5-second tick. Safe to call directly from tests.
 public sealed class RalphLoopDriver
 {
+    private const int WaitingReasonPromptPreviewLength = 80;
+
     private readonly KaguraDbContext _db;
     private readonly IAgentRunner _runner;
     private readonly GitService _git;
     private readonly AgentRunnerOptions _runnerOptions;
     private readonly RalphLoopOptions _options;
     private readonly IAgentBroadcaster _broadcaster;
+    private readonly ITriageKickoffService _triageKickoff;
+    private readonly IAutoReviewKickoffService _autoReviewKickoff;
+    private readonly IInteractivePromptService _prompts;
     private readonly ILogger<RalphLoopDriver> _log;
     private readonly TimeProvider _clock;
 
@@ -26,6 +33,9 @@ public sealed class RalphLoopDriver
         AgentRunnerOptions runnerOptions,
         RalphLoopOptions options,
         IAgentBroadcaster broadcaster,
+        ITriageKickoffService triageKickoff,
+        IAutoReviewKickoffService autoReviewKickoff,
+        IInteractivePromptService prompts,
         ILogger<RalphLoopDriver> log,
         TimeProvider clock)
     {
@@ -35,6 +45,9 @@ public sealed class RalphLoopDriver
         _runnerOptions = runnerOptions;
         _options = options;
         _broadcaster = broadcaster;
+        _triageKickoff = triageKickoff;
+        _autoReviewKickoff = autoReviewKickoff;
+        _prompts = prompts;
         _log = log;
         _clock = clock;
     }
@@ -44,44 +57,173 @@ public sealed class RalphLoopDriver
         var wi = await _db.WorkItems
             .Include(w => w.Source)
             .Include(w => w.Tasks).ThenInclude(t => t.Runs)
+            .Include(w => w.Runs)
+            .Include(w => w.AutoReviewInteractions)
             .FirstOrDefaultAsync(w => w.Id == workItemId, ct);
 
         if (wi is null || !wi.RalphLoopActive) return;
 
+        // Defensive exit for terminal states; the loop should already have been torn down.
+        if (wi.Status is WorkItemStatus.Closed or WorkItemStatus.PullRequested
+            or WorkItemStatus.Cancelled or WorkItemStatus.Done)
+        {
+            return;
+        }
+
         var now = _clock.GetUtcNow().UtcDateTime;
 
-        // Step 1: kill any agent runs past MaxRunDuration; sink will record KilledByTimeout.
+        // Protective sweeps run every tick regardless of the WI state, because a Running task
+        // hanging or crashing must always advance even mid-triage / mid-auto-review.
         await ApplyTimeoutsAsync(wi, now, ct);
-
-        // Step 2: any task that is Running but whose latest run already exited (Crashed/Killed)
-        // is a failed attempt — increment RetryAttempts, reset branch, or move to Failed.
         if (await HandleCrashedTasksAsync(wi, now, ct))
+            return; // halted
+
+        // Decision tree — picks the next applicable step.
+        var changed = await DriveStateAsync(wi, now, ct);
+
+        if (changed || _db.ChangeTracker.HasChanges())
         {
-            // halted
-            return;
+            await _db.SaveChangesAsync(ct);
+            await _broadcaster.WorkItemUpdatedAsync(wi.Id);
+        }
+    }
+
+    private async Task<bool> DriveStateAsync(WorkItem wi, DateTime now, CancellationToken ct)
+    {
+        // Step 2/3 — Triage flow for a New work item.
+        if (wi.Status == WorkItemStatus.New)
+        {
+            return await HandleNewAsync(wi, now, ct);
         }
 
-        // Step 3: merge AwaitingReview tasks in Order. Strict in-order merge into the WI branch.
-        if (await MergeAwaitingReviewInOrderAsync(wi, now, ct))
+        // For Triaged / InProgress / Merged we look at the tasks.
+        // Step 6 — AwaitingReview branches (auto-review delegation).
+        if (wi.Tasks.Any(t => t.Status == AgentTaskStatus.AwaitingReview))
         {
-            // halted on merge failure
-            return;
+            return await HandleAwaitingReviewAsync(wi, now, ct);
         }
 
-        // Step 4: if everything's Merged, open the PR and finish.
-        if (wi.Tasks.All(t => t.Status == AgentTaskStatus.Merged) && wi.Tasks.Count > 0)
+        // Step 7 — all tasks merged → open the PR.
+        if (wi.Tasks.Count > 0 && wi.Tasks.All(t => t.Status == AgentTaskStatus.Merged))
         {
             await FinishWithPrAsync(wi, now, ct);
-            return;
+            return true;
         }
 
-        // Step 5: top up agent slots — start the next Approved tasks in Order
-        // up to MaxConcurrentTasksPerWorkItem in-flight.
+        // Step 4/5 — top up agent slots for any Approved tasks.
         await TopUpAgentSlotsAsync(wi, now, ct);
-
-        await _db.SaveChangesAsync(ct);
-        await _broadcaster.WorkItemUpdatedAsync(wi.Id);
+        return true;
     }
+
+    // ---- Step 2/3: New ----
+
+    private async Task<bool> HandleNewAsync(WorkItem wi, DateTime now, CancellationToken ct)
+    {
+        // 3) If there are Proposed tasks, either auto-approve or stand by.
+        var proposed = wi.Tasks.Where(t => t.Status == AgentTaskStatus.Proposed).ToList();
+        if (proposed.Count > 0)
+        {
+            if (wi.AutoApproveTriage)
+            {
+                foreach (var t in proposed)
+                {
+                    t.Status = AgentTaskStatus.Approved;
+                    t.UpdatedAt = now;
+                }
+                wi.Status = WorkItemStatus.Triaged;
+                wi.TriagedAt = now;
+                wi.RalphLoopWaitingReason = null;
+                wi.UpdatedAt = now;
+                return true;
+            }
+
+            SetWaitingReason(wi, "Waiting for you to approve proposed tasks.", now);
+            return true;
+        }
+
+        // 2) No proposed tasks — drive triage.
+        var latestTriage = LatestRun(wi.Runs, AgentRunKind.Triage);
+
+        if (latestTriage is not null && latestTriage.Status == AgentRunStatus.Running)
+        {
+            SetWaitingReason(wi, "Triaging…", now);
+            return true;
+        }
+
+        if (!string.IsNullOrEmpty(wi.LastTriageError))
+        {
+            Halt(wi, wi.LastTriageError!, now);
+            return true;
+        }
+
+        // No run yet (or a previous run finished without proposals / error) — spawn one.
+        var result = await _triageKickoff.KickoffAsync(wi.Id, ct);
+        if (result.Error is not null)
+        {
+            Halt(wi, $"Failed to start triage: {result.Error}", now);
+            return true;
+        }
+
+        // The kickoff inserted the AgentRun row in a separate DbContext, so refresh wi.Runs
+        // by re-loading just the runs collection isn't strictly required — we just standby
+        // and pick the run up next tick.
+        SetWaitingReason(wi, "Triaging…", now);
+        return true;
+    }
+
+    // ---- Step 6: AwaitingReview ----
+
+    private async Task<bool> HandleAwaitingReviewAsync(WorkItem wi, DateTime now, CancellationToken ct)
+    {
+        if (!wi.AutoReviewEnabled)
+        {
+            SetWaitingReason(wi, "Waiting for you to review tasks.", now);
+            return true;
+        }
+
+        var latestAutoReview = LatestRun(wi.Runs, AgentRunKind.AutoReview);
+
+        if (latestAutoReview is not null && latestAutoReview.Status == AgentRunStatus.Running)
+        {
+            var pendingPrompt = FindPendingPrompt(wi, latestAutoReview);
+            if (pendingPrompt is not null)
+            {
+                var preview = Truncate(pendingPrompt, WaitingReasonPromptPreviewLength);
+                SetWaitingReason(wi, $"Auto-review needs your input: {preview}", now);
+            }
+            else
+            {
+                SetWaitingReason(wi, "Auto-reviewing…", now);
+            }
+            return true;
+        }
+
+        if (latestAutoReview is not null && latestAutoReview.EndedAt is not null)
+        {
+            // A completed auto-review run that left some tasks still AwaitingReview with
+            // ReviewNotes populated means the LLM flagged them for human attention.
+            var flagged = wi.Tasks.Count(t =>
+                t.Status == AgentTaskStatus.AwaitingReview &&
+                !string.IsNullOrEmpty(t.ReviewNotes));
+            if (flagged > 0)
+            {
+                Halt(wi, $"Auto-review flagged {flagged} task(s) for human review.", now);
+                return true;
+            }
+        }
+
+        // No run yet (or previous run finished cleanly) — spawn a fresh one.
+        var result = await _autoReviewKickoff.KickoffAsync(wi.Id, ct);
+        if (result.Error is not null)
+        {
+            Halt(wi, $"Failed to start auto-review: {result.Error}", now);
+            return true;
+        }
+        SetWaitingReason(wi, "Auto-reviewing…", now);
+        return true;
+    }
+
+    // ---- Step 5: timeout sweep ----
 
     private async Task ApplyTimeoutsAsync(WorkItem wi, DateTime now, CancellationToken ct)
     {
@@ -104,11 +246,11 @@ public sealed class RalphLoopDriver
             {
                 _log.LogError(ex, "Ralph: StopAsync failed for run {RunId}", latestRun.Id);
             }
-            // The sink writes the AgentRun row on OnExit. The next tick observes Status != Running and counts the failure.
         }
     }
 
-    // Returns true if the loop halted (and saved + broadcast).
+    // ---- Step 5: crashed-task retry sweep. Returns true if the loop halted. ----
+
     private async Task<bool> HandleCrashedTasksAsync(WorkItem wi, DateTime now, CancellationToken ct)
     {
         var halted = false;
@@ -132,7 +274,6 @@ public sealed class RalphLoopDriver
                 continue;
             }
 
-            // Clean slate for the next attempt: drop the worktree and reset the task branch.
             try
             {
                 await _git.ResetTaskBranchAsync(wi.Source.LocalRepoPath, wi, task, ct);
@@ -147,9 +288,7 @@ public sealed class RalphLoopDriver
 
         if (halted)
         {
-            wi.RalphLoopActive = false;
-            wi.RalphLoopHaltReason = haltReason;
-            wi.UpdatedAt = now;
+            Halt(wi, haltReason!, now);
             await _db.SaveChangesAsync(ct);
             await _broadcaster.WorkItemUpdatedAsync(wi.Id);
             return true;
@@ -160,41 +299,7 @@ public sealed class RalphLoopDriver
         return false;
     }
 
-    // Returns true if a merge failure halted the loop.
-    private async Task<bool> MergeAwaitingReviewInOrderAsync(WorkItem wi, DateTime now, CancellationToken ct)
-    {
-        foreach (var task in wi.Tasks.OrderBy(t => t.Order))
-        {
-            if (task.Status == AgentTaskStatus.Merged) continue;
-            if (task.Status != AgentTaskStatus.AwaitingReview) break; // strict in-order: stop at first not-ready slot
-
-            try
-            {
-                var result = await _git.MergeTaskBranchAsync(wi.Source.LocalRepoPath, wi, task, ct);
-                if (!string.IsNullOrEmpty(task.WorktreePath))
-                    await _git.RemoveWorktreeAsync(wi.Source.LocalRepoPath, task.WorktreePath, ct);
-                task.Status = AgentTaskStatus.Merged;
-                if (result.Outcome == MergeOutcome.MergedByAgent)
-                    task.ReviewNotes = $"Conflicts resolved by AI: {result.Notes}";
-                task.UpdatedAt = now;
-                wi.BranchName ??= _git.WorkItemBranchName(wi);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Ralph: merge failed for task {TaskId}", task.Id);
-                wi.RalphLoopActive = false;
-                wi.RalphLoopHaltReason = $"Merge failed for task '{task.Title}': {ex.Message}";
-                wi.UpdatedAt = now;
-                await _db.SaveChangesAsync(ct);
-                await _broadcaster.WorkItemUpdatedAsync(wi.Id);
-                return true;
-            }
-        }
-
-        if (_db.ChangeTracker.HasChanges())
-            await _db.SaveChangesAsync(ct);
-        return false;
-    }
+    // ---- Step 7: open the PR once every task is Merged ----
 
     private async Task FinishWithPrAsync(WorkItem wi, DateTime now, CancellationToken ct)
     {
@@ -214,6 +319,7 @@ public sealed class RalphLoopDriver
                 wi.Status = WorkItemStatus.PullRequested;
                 wi.RalphLoopActive = false;
                 wi.RalphLoopHaltReason = null;
+                wi.RalphLoopWaitingReason = null;
                 wi.UpdatedAt = DateTime.UtcNow;
             }
             else
@@ -229,39 +335,46 @@ public sealed class RalphLoopDriver
 
         if (prError is not null)
         {
-            wi.RalphLoopActive = false;
-            wi.RalphLoopHaltReason = prError;
-            wi.UpdatedAt = DateTime.UtcNow;
+            Halt(wi, prError, DateTime.UtcNow);
         }
         else
         {
             try { await _git.RemoveWorkItemMergeWorktreeAsync(wi.Source.LocalRepoPath, wi, ct); }
             catch (Exception ex) { _log.LogWarning(ex, "Ralph: failed to clean up merge worktree for {WorkItemId}", wi.Id); }
         }
-
-        await _db.SaveChangesAsync(ct);
-        await _broadcaster.WorkItemUpdatedAsync(wi.Id);
     }
+
+    // ---- Step 4: top up agent slots ----
 
     private async Task TopUpAgentSlotsAsync(WorkItem wi, DateTime now, CancellationToken ct)
     {
         var inFlight = wi.Tasks.Count(t =>
             t.Status is AgentTaskStatus.Running or AgentTaskStatus.AwaitingReview);
         var capacity = _options.MaxConcurrentTasksPerWorkItem - inFlight;
-        if (capacity <= 0) return;
+        if (capacity <= 0)
+        {
+            // Clear any stale waiting reason while we wait for slots to free up; nothing to standby on.
+            wi.RalphLoopWaitingReason = null;
+            return;
+        }
 
         var startable = wi.Tasks
             .Where(t => t.Status == AgentTaskStatus.Approved)
             .OrderBy(t => t.Order)
             .Take(capacity)
             .ToList();
-        if (startable.Count == 0) return;
+        if (startable.Count == 0)
+        {
+            wi.RalphLoopWaitingReason = null;
+            return;
+        }
 
         if (wi.Status == WorkItemStatus.Triaged)
         {
             wi.Status = WorkItemStatus.InProgress;
             wi.UpdatedAt = now;
         }
+        wi.RalphLoopWaitingReason = null;
 
         foreach (var task in startable)
         {
@@ -295,9 +408,7 @@ public sealed class RalphLoopDriver
                 if (task.RetryAttempts >= _options.MaxRetryAttempts)
                 {
                     task.Status = AgentTaskStatus.Failed;
-                    wi.RalphLoopActive = false;
-                    wi.RalphLoopHaltReason = $"Task '{task.Title}' failed to start after {task.RetryAttempts} attempts: {ex.Message}";
-                    wi.UpdatedAt = DateTime.UtcNow;
+                    Halt(wi, $"Task '{task.Title}' failed to start after {task.RetryAttempts} attempts: {ex.Message}", DateTime.UtcNow);
                     await _db.SaveChangesAsync(ct);
                     await _broadcaster.WorkItemUpdatedAsync(wi.Id);
                     return;
@@ -307,6 +418,44 @@ public sealed class RalphLoopDriver
         }
     }
 
+    // ---- helpers ----
+
+    private static void SetWaitingReason(WorkItem wi, string reason, DateTime now)
+    {
+        if (wi.RalphLoopWaitingReason == reason && wi.UpdatedAt > DateTime.MinValue) return;
+        wi.RalphLoopWaitingReason = reason;
+        wi.UpdatedAt = now;
+    }
+
+    private static void Halt(WorkItem wi, string reason, DateTime now)
+    {
+        wi.RalphLoopActive = false;
+        wi.RalphLoopHaltReason = reason;
+        wi.RalphLoopWaitingReason = null;
+        wi.UpdatedAt = now;
+    }
+
     private static AgentRun? LatestRun(AgentTask task) =>
         task.Runs.OrderByDescending(r => r.StartedAt).FirstOrDefault();
+
+    private static AgentRun? LatestRun(IEnumerable<AgentRun> runs, AgentRunKind kind) =>
+        runs.Where(r => r.Kind == kind).OrderByDescending(r => r.StartedAt).FirstOrDefault();
+
+    private string? FindPendingPrompt(WorkItem wi, AgentRun run)
+    {
+        // Prefer persisted AutoReviewInteractions; fall back to the in-memory interactive
+        // prompt service if no persisted row matches (the prompt service is what AskAsync
+        // actually blocks on, so it is the authoritative "is there a pending prompt").
+        var persisted = wi.AutoReviewInteractions
+            .Where(i => i.AgentRunId == run.Id && i.IsPending)
+            .OrderByDescending(i => i.Sequence)
+            .FirstOrDefault();
+        if (persisted is not null) return persisted.Prompt;
+
+        var inMemory = _prompts.GetPending(run.Id).FirstOrDefault();
+        return inMemory?.Question;
+    }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "…";
 }
