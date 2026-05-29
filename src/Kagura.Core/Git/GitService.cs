@@ -9,24 +9,50 @@ public enum MergeOutcome { AlreadyMerged, Merged, MergedByAgent }
 
 public record MergeResult(MergeOutcome Outcome, string? Notes = null);
 
+/// <summary>
+/// Hook invoked by <see cref="GitService.MergeTaskBranchAsync"/> immediately before the
+/// <see cref="IMergeConflictResolver"/> is called on a conflicted merge. The
+/// <see cref="Kagura.Api"/> implementation creates an AgentRun row, populates the
+/// ambient <see cref="MergeResolverAgentContext"/>, and returns an <see cref="IDisposable"/>
+/// that clears the ambient on dispose so a later merge invocation on the same async
+/// flow doesn't accidentally reuse stale state. Tests can pass <c>null</c> (or a no-op
+/// implementation) and the resolver will fall back to its legacy path.
+/// </summary>
+public interface IMergeResolverKickoff
+{
+    Task<IAsyncDisposable> BeginAsync(WorkItem wi, AgentTask task, CancellationToken ct);
+}
+
 public partial class GitService
 {
     private readonly string _worktreesRoot;
     private readonly string _scratchRoot;
     private readonly IMergeConflictResolver _resolver;
+    private readonly IMergeResolverKickoff? _mergeKickoff;
     private readonly ILogger<GitService> _log;
 
     public GitService(string worktreesRoot, IMergeConflictResolver resolver, ILogger<GitService> log)
-        : this(worktreesRoot, scratchRoot: "~/.devflow/scratch", resolver, log)
+        : this(worktreesRoot, scratchRoot: "~/.devflow/scratch", resolver, log, mergeKickoff: null)
     {
     }
 
     public GitService(string worktreesRoot, string scratchRoot, IMergeConflictResolver resolver, ILogger<GitService> log)
+        : this(worktreesRoot, scratchRoot, resolver, log, mergeKickoff: null)
+    {
+    }
+
+    public GitService(
+        string worktreesRoot,
+        string scratchRoot,
+        IMergeConflictResolver resolver,
+        ILogger<GitService> log,
+        IMergeResolverKickoff? mergeKickoff)
     {
         _worktreesRoot = ResolveHome(worktreesRoot);
         _scratchRoot = ResolveHome(scratchRoot);
         _resolver = resolver;
         _log = log;
+        _mergeKickoff = mergeKickoff;
         Directory.CreateDirectory(_worktreesRoot);
         Directory.CreateDirectory(_scratchRoot);
     }
@@ -193,7 +219,23 @@ public partial class GitService
         _log.LogWarning("Merge of {TaskBranch} into {WorkItemBranch} hit conflicts; invoking resolver",
             taskBranch, workItemBranch);
 
-        var resolution = await _resolver.ResolveAsync(mergePath, task.Title, ct);
+        // Per ADR 0001 and issue #66: when a kickoff hook is wired in (production path), the
+        // resolver runs as a PTY MergeResolver Agent in this very merge worktree. The hook
+        // creates the AgentRun row and populates the ambient MergeResolverAgentContext for
+        // the duration of the ResolveAsync call. In test paths (and any caller that didn't
+        // wire the hook in) the resolver falls back to its legacy one-shot CLI behaviour —
+        // both keep ResolveAsync's signature intact.
+        MergeResolutionResult resolution;
+        if (_mergeKickoff is not null)
+        {
+            await using var _ = await _mergeKickoff.BeginAsync(wi, task, ct);
+            resolution = await _resolver.ResolveAsync(mergePath, task.Title, ct);
+        }
+        else
+        {
+            resolution = await _resolver.ResolveAsync(mergePath, task.Title, ct);
+        }
+
         if (resolution.Success && await IsMergeFinalizedAsync(mergePath, ct))
         {
             _log.LogInformation("Resolver finalized merge of {TaskBranch}", taskBranch);

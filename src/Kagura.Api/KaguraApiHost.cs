@@ -126,12 +126,19 @@ public static class KaguraApiHost
             opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
             opt.Model = builder.Configuration["MergeResolver:Model"];
         });
+        builder.Services.AddSingleton<MergeResolverAgentContext>();
+        // Lazy<IAgentRunner> wires through the circular dep: GitService → resolver → runner → GitService.
+        // Lazy is constructed eagerly here; .Value is only touched when ResolveAsync runs.
+        builder.Services.AddSingleton(sp => new Lazy<IAgentRunner>(sp.GetRequiredService<IAgentRunner>));
         builder.Services.AddSingleton<IMergeConflictResolver, ClaudeCliMergeResolver>();
+        builder.Services.AddSingleton<IMergeResolverKickoff, MergeResolverKickoffService>();
 
         builder.Services.AddSingleton(sp =>
             new GitService(devflow["WorktreesRoot"] ?? "~/.devflow/worktrees",
+                scratchRoot: devflow["ScratchRoot"] ?? "~/.devflow/scratch",
                 sp.GetRequiredService<IMergeConflictResolver>(),
-                sp.GetRequiredService<ILogger<GitService>>()));
+                sp.GetRequiredService<ILogger<GitService>>(),
+                sp.GetRequiredService<IMergeResolverKickoff>()));
         builder.Services.AddSingleton<MergePreviewService>();
         builder.Services.AddSingleton<IPrPreviewService, GitPrPreviewService>();
         builder.Services.AddSingleton(new AgentRunnerOptions

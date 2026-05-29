@@ -83,6 +83,12 @@ public static class McpEndpoints
                             description = "Submit the refined work-item body produced by the grilling conversation. Calling this tool ends the Grill agent.",
                             inputSchema = GrillInputSchema,
                         },
+                        new
+                        {
+                            name = Role.MergeResolver.McpSubmitToolName(),
+                            description = "Submit the outcome of an attempted merge-conflict resolution. Set `resolved` true only after `git add`/`git commit` finalized the merge; otherwise set it false and leave the worktree mid-merge. Calling this tool ends the MergeResolver agent.",
+                            inputSchema = MergeResolutionInputSchema,
+                        },
                     },
                 }),
                 "tools/call" => await CallToolAsync(id, message, runId, submissions, log),
@@ -136,6 +142,27 @@ public static class McpEndpoints
         additionalProperties = false,
     };
 
+    // JSON Schema for kagura.submit_merge_resolution's input. Mirrors MergeResolutionSubmission.
+    private static readonly object MergeResolutionInputSchema = new
+    {
+        type = "object",
+        properties = new
+        {
+            resolved = new
+            {
+                type = "boolean",
+                description = "True if the conflicts were resolved AND the merge was finalized via git commit; false if the agent abandoned the merge and left the worktree mid-conflict for human attention.",
+            },
+            notes = new
+            {
+                type = "string",
+                description = "Short (1-3 sentences) explanation of what was done, or why the agent gave up.",
+            },
+        },
+        required = new[] { "resolved", "notes" },
+        additionalProperties = false,
+    };
+
     private static async Task<IResult> CallToolAsync(
         JsonElement? id, JsonElement message, Guid runId,
         IAgentSubmissionCoordinator submissions, ILogger log)
@@ -146,7 +173,9 @@ public static class McpEndpoints
         var name = paramsEl.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
         if (string.IsNullOrEmpty(name)) return InvalidParams(id, "Missing tool name.");
 
-        if (name != Role.Triage.McpSubmitToolName() && name != Role.Grill.McpSubmitToolName())
+        if (name != Role.Triage.McpSubmitToolName() &&
+            name != Role.Grill.McpSubmitToolName() &&
+            name != Role.MergeResolver.McpSubmitToolName())
             return ToolError(id, $"Unknown tool '{name}'.");
 
         if (!paramsEl.TryGetProperty("arguments", out var args) || args.ValueKind != JsonValueKind.Object)
