@@ -20,6 +20,9 @@ internal sealed class StubAgentRunner : IAgentRunner
     public Task StopAsync(Guid runId) => Task.CompletedTask;
     public Task DismissAsync(Guid runId) => Task.CompletedTask;
     public void MarkExitReason(Guid runId, AgentExitReason reason) { }
+    public Task<TResult> StartAndAwaitResultAsync<TResult>(
+        Guid runId, WorkItem wi, Role role, string prompt, string cwd, CancellationToken ct = default) =>
+        throw new InvalidOperationException("StartAndAwaitResultAsync was unexpectedly invoked in this test.");
 }
 
 internal sealed class CapturingBroadcaster : IAgentBroadcaster
@@ -29,6 +32,9 @@ internal sealed class CapturingBroadcaster : IAgentBroadcaster
     public Task ExitAsync(Guid runId, int? exitCode) => Task.CompletedTask;
     public Task WorkItemUpdatedAsync(Guid workItemId) { WorkItemUpdates.Add(workItemId); return Task.CompletedTask; }
     public Task PromptAsync(InteractivePrompt prompt) => Task.CompletedTask;
+    public Task AgentAppearedAsync(AgentSidebarEvent evt) => Task.CompletedTask;
+    public Task AgentDismissedAsync(Guid runId) => Task.CompletedTask;
+    public Task AgentStatusChangedAsync(Guid runId, string statusLine) => Task.CompletedTask;
 }
 
 internal sealed class FakeTriageKickoff : ITriageKickoffService

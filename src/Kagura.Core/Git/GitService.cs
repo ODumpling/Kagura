@@ -12,15 +12,23 @@ public record MergeResult(MergeOutcome Outcome, string? Notes = null);
 public partial class GitService
 {
     private readonly string _worktreesRoot;
+    private readonly string _scratchRoot;
     private readonly IMergeConflictResolver _resolver;
     private readonly ILogger<GitService> _log;
 
     public GitService(string worktreesRoot, IMergeConflictResolver resolver, ILogger<GitService> log)
+        : this(worktreesRoot, scratchRoot: "~/.devflow/scratch", resolver, log)
+    {
+    }
+
+    public GitService(string worktreesRoot, string scratchRoot, IMergeConflictResolver resolver, ILogger<GitService> log)
     {
         _worktreesRoot = ResolveHome(worktreesRoot);
+        _scratchRoot = ResolveHome(scratchRoot);
         _resolver = resolver;
         _log = log;
         Directory.CreateDirectory(_worktreesRoot);
+        Directory.CreateDirectory(_scratchRoot);
     }
 
     [GeneratedRegex("[^a-zA-Z0-9]+")]
@@ -46,6 +54,65 @@ public partial class GitService
     // Underscore prefix keeps this from colliding with any task slug (Slug() strips `_`).
     public string WorkItemMergeWorktreePath(WorkItem wi) =>
         Path.Combine(_worktreesRoot, Slug(wi.ExternalId), "_merge");
+
+    /// <summary>
+    /// Path to the long-lived scratch worktree for a Source. Per CONTEXT.md → "Agent working
+    /// directory": one per-Source worktree at <c>~/.devflow/scratch/&lt;source&gt;/</c> on a
+    /// detached HEAD at the default branch. Used by Triage and Grill Agents so they don't
+    /// touch the user's working copy.
+    /// </summary>
+    public string ScratchWorktreePath(Source source) =>
+        Path.Combine(_scratchRoot, Slug(source.Name));
+
+    /// <summary>
+    /// Ensure the per-Source scratch worktree exists and is fresh. Creates it with
+    /// <c>git worktree add --detach</c> from <c>origin/&lt;default&gt;</c> on first call,
+    /// then refreshes via <c>git fetch &amp;&amp; git reset --hard origin/&lt;default&gt;</c>
+    /// on every subsequent call so the snapshot is current at Agent spawn.
+    /// Returns the worktree path.
+    /// </summary>
+    public async Task<string> EnsureScratchWorktreeAsync(Source source, CancellationToken ct = default)
+    {
+        var repoPath = source.LocalRepoPath;
+        var worktreePath = ScratchWorktreePath(source);
+        var defaultBranch = await GetDefaultBranchAsync(repoPath, ct);
+
+        // git fetch is best-effort — if the user is offline, we still want the worktree to be
+        // usable from whatever commits are already in the local repo.
+        var fetch = await ProcessRunner.RunAsync("git", new[] { "fetch", "origin" }, repoPath, ct);
+        if (!fetch.Success)
+            _log.LogWarning("git fetch failed in scratch worktree setup for {Source}: {Stderr}", source.Name, fetch.Stderr);
+
+        var resetTarget = $"origin/{defaultBranch}";
+        // If origin/<default> doesn't resolve (e.g. no remote, or unfetched), fall back to the
+        // local default branch.
+        var hasOrigin = (await ProcessRunner.RunAsync("git",
+            new[] { "rev-parse", "--verify", resetTarget }, repoPath, ct)).Success;
+        if (!hasOrigin) resetTarget = defaultBranch;
+
+        if (!Directory.Exists(worktreePath))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(worktreePath)!);
+            await ProcessRunner.RunRequiredAsync("git",
+                new[] { "worktree", "add", "--detach", worktreePath, resetTarget }, repoPath, ct);
+            _log.LogInformation("Created scratch worktree {Path} on {Ref} for {Source}",
+                worktreePath, resetTarget, source.Name);
+            return worktreePath;
+        }
+
+        // Refresh path: reset the existing worktree to match origin/<default>.
+        await ProcessRunner.RunRequiredAsync("git",
+            new[] { "reset", "--hard", resetTarget }, worktreePath, ct);
+        _log.LogDebug("Refreshed scratch worktree {Path} to {Ref}", worktreePath, resetTarget);
+        return worktreePath;
+    }
+
+    /// <summary>
+    /// Remove a Source's scratch worktree. Called when a Source is deleted so we don't leak
+    /// disk space. Safe to call when the directory doesn't exist.
+    /// </summary>
+    public Task RemoveScratchWorktreeAsync(Source source, CancellationToken ct = default) =>
+        RemoveWorktreeAsync(source.LocalRepoPath, ScratchWorktreePath(source), ct);
 
     public async Task<string> EnsureWorkItemBranchAsync(string repoPath, WorkItem wi, CancellationToken ct = default)
     {

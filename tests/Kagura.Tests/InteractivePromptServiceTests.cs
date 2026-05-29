@@ -87,5 +87,8 @@ public class InteractivePromptServiceTests
             lock (Emitted) Emitted.Add(prompt);
             return Task.CompletedTask;
         }
+        public Task AgentAppearedAsync(AgentSidebarEvent evt) => Task.CompletedTask;
+        public Task AgentDismissedAsync(Guid runId) => Task.CompletedTask;
+        public Task AgentStatusChangedAsync(Guid runId, string statusLine) => Task.CompletedTask;
     }
 }

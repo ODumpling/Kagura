@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Kagura.Core.Agents;
+using Kagura.Core.Agents.Mcp;
 using Kagura.Core.ClaudeCli;
+using Kagura.Core.Git;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -14,7 +17,53 @@ public class TriageOptions
 
 public class ClaudeCliTriageService : ITriageService
 {
-    private const string SystemPrompt =
+    /// <summary>
+    /// Built-in Triage prompt template. Per ADR 0002 this is the default a Source resolves at
+    /// Agent spawn time when it hasn't customised its own Triage prompt; per-Source overrides
+    /// are issue #69 and intentionally out of scope here.
+    /// Placeholders: <c>{{TITLE}}</c>, <c>{{LABELS}}</c>, <c>{{BODY}}</c>,
+    /// <c>{{EXISTING_TASKS}}</c>, <c>{{SUBMIT_TOOL}}</c>.
+    /// </summary>
+    public const string DefaultPromptTemplate =
+        """
+        You are a triage assistant for a developer workflow tool. You receive a software issue
+        (title, body, labels) and propose a list of small, independently executable tasks that
+        together complete the issue.
+
+        Rules:
+        - Each task should be small enough to be completed by one autonomous coding agent in a single session.
+        - Prefer 1–5 tasks. Fewer if the issue is small.
+        - Tasks should be as parallelizable as possible. If they MUST run in order, that's fine — set Order accordingly.
+        - Titles are imperative, under 80 characters ("Add ...", "Refactor ...", "Wire ...").
+        - Descriptions are 1-3 sentences explaining scope, files likely involved, and acceptance criteria.
+
+        The work item:
+
+        Title: {{TITLE}}
+
+        Labels: {{LABELS}}
+
+        Body:
+        {{BODY}}
+        {{EXISTING_TASKS}}
+
+        When you are ready to deliver the proposed tasks, call the MCP tool `{{SUBMIT_TOOL}}` with
+        an argument shaped as:
+
+        {
+          "tasks": [
+            { "title": "...", "description": "...", "order": 0 },
+            ...
+          ]
+        }
+
+        Calling the tool is what hands the result back to Kagura — do not print the JSON to stdout,
+        do not create any files, do not edit the working tree. After the tool call succeeds,
+        exit cleanly.
+        """;
+
+    // Legacy one-shot SystemPrompt used when no TriageAgentContext is supplied (fallback path).
+    private const string LegacySystemPrompt =
         """
         You are a triage assistant for a developer workflow tool. You receive a software issue (title, body, labels)
         and propose a list of small, independently executable tasks that together complete the issue.
@@ -33,11 +82,25 @@ public class ClaudeCliTriageService : ITriageService
         """;
 
     private readonly TriageOptions _options;
+    private readonly TriageAgentContext _context;
+    private readonly IAgentRunner _runner;
+    private readonly GitService _git;
+    private readonly IPromptSnapshotSink _promptSink;
     private readonly ILogger<ClaudeCliTriageService> _log;
 
-    public ClaudeCliTriageService(IOptions<TriageOptions> options, ILogger<ClaudeCliTriageService> log)
+    public ClaudeCliTriageService(
+        IOptions<TriageOptions> options,
+        TriageAgentContext context,
+        IAgentRunner runner,
+        GitService git,
+        IPromptSnapshotSink promptSink,
+        ILogger<ClaudeCliTriageService> log)
     {
         _options = options.Value;
+        _context = context;
+        _runner = runner;
+        _git = git;
+        _promptSink = promptSink;
         _log = log;
     }
 
@@ -46,12 +109,76 @@ public class ClaudeCliTriageService : ITriageService
         IReadOnlyList<ExistingTask>? existingTasks = null,
         CancellationToken ct = default)
     {
+        // Per ADR 0001: when invoked inside the Agent kickoff path, spawn a PTY Triage Agent
+        // and block on its MCP submission. Without a context we fall back to the legacy
+        // one-shot `claude -p` invocation so the strings-only interface still works.
+        if (_context.IsSet)
+            return await ProposeViaAgentAsync(workItemTitle, workItemBody, labels, existingTasks, ct);
+
+        return await ProposeViaLegacyCliAsync(workItemTitle, workItemBody, labels, existingTasks, ct);
+    }
+
+    private async Task<IReadOnlyList<TriagedTaskProposal>> ProposeViaAgentAsync(
+        string workItemTitle, string workItemBody, string? labels,
+        IReadOnlyList<ExistingTask>? existingTasks,
+        CancellationToken ct)
+    {
+        var wi = _context.WorkItem!;
+        var runId = _context.RunId;
+
+        // Per CONTEXT.md → "Agent working directory": Triage runs in the Source's scratch
+        // worktree on detached HEAD at the default branch. Refresh on every spawn.
+        var cwd = await _git.EnsureScratchWorktreeAsync(wi.Source, ct);
+
+        var prompt = RenderPrompt(workItemTitle, workItemBody, labels, existingTasks);
+
+        // Snapshot the resolved prompt onto AgentRun.PromptText BEFORE spawning so the audit
+        // trail is correct even if the PTY crashes immediately. (ADR 0002.)
+        await _promptSink.SaveAsync(runId, prompt, ct);
+
+        _log.LogInformation(
+            "Spawning Triage Agent for work item {WorkItemId} in scratch worktree {Cwd}",
+            wi.Id, cwd);
+
+        var submission = await _runner.StartAndAwaitResultAsync<TriageSubmission>(
+            runId, wi, Role.Triage, prompt, cwd, ct);
+
+        return submission.Tasks
+            .Select(t => new TriagedTaskProposal(t.Title, t.Description, t.Order))
+            .ToList();
+    }
+
+    public static string RenderPrompt(
+        string workItemTitle, string workItemBody, string? labels,
+        IReadOnlyList<ExistingTask>? existingTasks)
+    {
+        var existingBlock = (existingTasks is null || existingTasks.Count == 0)
+            ? string.Empty
+            : "\n\nExisting tasks already proposed or in flight for this work item:\n" +
+              string.Join("\n", existingTasks.Select((t, i) => $"{i + 1}. {t.Title}\n   {t.Description}")) +
+              "\n\nDo NOT propose duplicates or near-duplicates of the existing tasks above. Only suggest new tasks that cover work not already represented.";
+
+        return DefaultPromptTemplate
+            .Replace("{{TITLE}}", workItemTitle)
+            .Replace("{{LABELS}}", labels ?? "(none)")
+            .Replace("{{BODY}}", workItemBody)
+            .Replace("{{EXISTING_TASKS}}", existingBlock)
+            .Replace("{{SUBMIT_TOOL}}", Role.Triage.McpSubmitToolName());
+    }
+
+    // ---------------- Legacy one-shot fallback ----------------
+
+    private async Task<IReadOnlyList<TriagedTaskProposal>> ProposeViaLegacyCliAsync(
+        string workItemTitle, string workItemBody, string? labels,
+        IReadOnlyList<ExistingTask>? existingTasks,
+        CancellationToken ct)
+    {
         var userPrompt = BuildUserPrompt(workItemTitle, workItemBody, labels, existingTasks);
 
         var args = new List<string>
         {
             "-p", userPrompt,
-            "--append-system-prompt", SystemPrompt,
+            "--append-system-prompt", LegacySystemPrompt,
             "--output-format", "stream-json",
             "--verbose",
         };
@@ -83,7 +210,7 @@ public class ClaudeCliTriageService : ITriageService
         var arr = JsonSerializer.Deserialize<List<TriagedTaskProposal>>(json, JsonOpts)
                   ?? throw new InvalidOperationException("Could not parse triage response as JSON array");
 
-        _log.LogInformation("Triage proposed {Count} tasks", arr.Count);
+        _log.LogInformation("Triage (legacy path) proposed {Count} tasks", arr.Count);
         return arr;
     }
 
@@ -136,4 +263,15 @@ public class ClaudeCliTriageService : ITriageService
         [property: JsonPropertyName("result")] string? Result,
         [property: JsonPropertyName("subtype")] string? Subtype,
         [property: JsonPropertyName("is_error")] bool IsError);
+}
+
+/// <summary>
+/// Persists the resolved prompt onto the matching <c>AgentRun</c> row at spawn time.
+/// Per ADR 0002: every AgentRun snapshots the resolved prompt so the audit trail of past
+/// runs is unaffected by later prompt edits. The interface lives in Core so
+/// <c>ClaudeCliTriageService</c> can call it without a hard Data dependency.
+/// </summary>
+public interface IPromptSnapshotSink
+{
+    Task SaveAsync(Guid runId, string promptText, CancellationToken ct);
 }

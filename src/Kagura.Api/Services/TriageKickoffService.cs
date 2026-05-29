@@ -76,10 +76,21 @@ public sealed class TriageKickoffService : ITriageKickoffService
         var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
         var triage = scope.ServiceProvider.GetRequiredService<ITriageService>();
         var broadcaster = scope.ServiceProvider.GetRequiredService<IAgentBroadcaster>();
+        var agentContext = scope.ServiceProvider.GetRequiredService<Kagura.Core.Triage.TriageAgentContext>();
 
-        var wi = await db.WorkItems.Include(w => w.Tasks).FirstOrDefaultAsync(w => w.Id == workItemId);
+        var wi = await db.WorkItems
+            .Include(w => w.Tasks)
+            .Include(w => w.Source)
+            .FirstOrDefaultAsync(w => w.Id == workItemId);
         var run = await db.AgentRuns.FirstOrDefaultAsync(r => r.Id == runId);
         if (wi is null || run is null) return;
+
+        // Per CONTEXT.md → "Agent result contract": the Triage path runs as a PTY Agent that
+        // delivers its proposed tasks via the kagura.submit_triage MCP tool. The scoped
+        // TriageAgentContext is how the kickoff hands the WorkItem + runId down to the
+        // ClaudeCliTriageService implementation without changing the ITriageService signature.
+        agentContext.WorkItem = wi;
+        agentContext.RunId = runId;
 
         try
         {

@@ -3,6 +3,7 @@ using Kagura.Api.HostedServices;
 using Kagura.Api.Hubs;
 using Kagura.Api.Services;
 using Kagura.Core.Agents;
+using Kagura.Core.Agents.Mcp;
 using Kagura.Core.Git;
 using Kagura.Core.Grill;
 using Kagura.Core.Interactive;
@@ -97,6 +98,8 @@ public static class KaguraApiHost
             opt.Model = builder.Configuration["Triage:Model"];
         });
         builder.Services.AddScoped<ITriageService, ClaudeCliTriageService>();
+        builder.Services.AddScoped<TriageAgentContext>();
+        builder.Services.AddScoped<IPromptSnapshotSink, DbPromptSnapshotSink>();
         builder.Services.AddScoped<ITriageKickoffService, TriageKickoffService>();
 
         builder.Services.Configure<ReviewOptions>(opt =>
@@ -140,6 +143,7 @@ public static class KaguraApiHost
         });
         builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
         builder.Services.AddSingleton<IInteractivePromptService, InteractivePromptService>();
+        builder.Services.AddSingleton<IAgentSubmissionCoordinator, AgentSubmissionCoordinator>();
         builder.Services.AddSingleton<IAgentRunner, AgentRunner>();
         builder.Services.AddScoped<IAgentRunSink, AgentRunSink>();
 
@@ -206,6 +210,7 @@ public static class KaguraApiHost
         app.MapAgentEndpoints();
         app.MapReviewPromptEndpoints();
         app.MapAutoReviewInteractionEndpoints();
+        app.MapMcpEndpoints();
         app.MapHub<AgentHub>("/hubs/agent");
 
         // Dedicated identification probe used by `kagura stop` to verify the listener
