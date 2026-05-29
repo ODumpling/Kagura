@@ -1,8 +1,7 @@
+using Kagura.Api.Services;
 using Kagura.Core.Agents;
 using Kagura.Core.Domain;
 using Kagura.Core.Git;
-using Kagura.Core.Interactive;
-using Kagura.Core.Review;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -60,6 +59,10 @@ public record AgentTaskDto(
     string? LastFailureReason = null);
 
 public record UpdateIncludeInPullRequestDto(bool IncludeInPullRequest);
+
+public record RalphLoopActivationDto(bool AutoApproveTriage, bool AutoReviewEnabled);
+
+public record RalphConfigUpdateDto(bool? AutoApproveTriage, bool? AutoReviewEnabled);
 
 public record FinishWorkItemResultDto(
     Guid Id,
@@ -309,43 +312,57 @@ public static class WorkItemEndpoints
                 merged, alreadyMerged, prError));
         });
 
-        // Fire-and-forget auto-review. Validates the queue, persists a Running AgentRun,
-        // returns 202 with the runId, then a background task asks the review service for
-        // each AwaitingReview task and applies its verdict — auto-merging or flagging
-        // with ReviewNotes — before emitting workItemUpdated on completion.
+        // Fire-and-forget auto-review. Returns 202 with the new AgentRun's runId immediately;
+        // the kickoff service persists the AgentRun and spawns the background task that the
+        // Ralph driver also consumes.
         grp.MapPost("/{id:guid}/auto-review", async (
             Guid id,
-            KaguraDbContext db,
-            IServiceScopeFactory scopeFactory,
-            ILogger<Program> log,
+            IAutoReviewKickoffService kickoff,
             CancellationToken ct) =>
         {
-            var wi = await db.WorkItems
-                .Include(w => w.Tasks)
-                .FirstOrDefaultAsync(w => w.Id == id, ct);
-            if (wi is null) return Results.NotFound();
-
-            var hasQueue = wi.Tasks.Any(t => t.Status == AgentTaskStatus.AwaitingReview);
-            if (!hasQueue)
-                return Results.BadRequest(new { error = "No tasks in AwaitingReview." });
-
-            var run = new AgentRun
-            {
-                Kind = AgentRunKind.AutoReview,
-                WorkItemId = wi.Id,
-                Status = AgentRunStatus.Running,
-            };
-            db.AgentRuns.Add(run);
-            await db.SaveChangesAsync(ct);
-
-            _ = Task.Run(() => RunAutoReviewAsync(scopeFactory, log, id, run.Id));
-
-            return Results.Accepted(value: new { runId = run.Id });
+            var result = await kickoff.KickoffAsync(id, ct);
+            if (result.WorkItemNotFound) return Results.NotFound();
+            if (result.Error is not null) return Results.BadRequest(new { error = result.Error });
+            return Results.Accepted(value: new { runId = result.RunId!.Value });
         });
 
-        // Start (or re-start after halt) the Ralph Loop on this work item.
-        // Resets any Failed tasks to Approved with fresh retry budget, then flips the flag.
+        // First activation. 409 if already Active; 400 if Grill is active or the work item is in a terminal state.
+        // Does not touch HaltReason / WaitingReason / LastTriageError — use /resume for that.
         grp.MapPost("/{id:guid}/ralph-loop", async (
+            Guid id,
+            RalphLoopActivationDto body,
+            KaguraDbContext db,
+            IAgentBroadcaster broadcaster,
+            CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems.FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (wi is null) return Results.NotFound();
+
+            if (wi.RalphLoopActive)
+                return Results.Conflict(new { error = "Ralph Loop is already active." });
+
+            if (wi.GrillStatus == GrillStatus.Active)
+                return Results.BadRequest(new { error = "Grill is active on this work item." });
+
+            if (wi.Status is WorkItemStatus.PullRequested
+                or WorkItemStatus.Cancelled
+                or WorkItemStatus.Closed
+                or WorkItemStatus.Done)
+                return Results.BadRequest(new { error = $"Work item is {wi.Status}; nothing for Ralph to do." });
+
+            wi.RalphLoopActive = true;
+            wi.AutoApproveTriage = body.AutoApproveTriage;
+            wi.AutoReviewEnabled = body.AutoReviewEnabled;
+            wi.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
+
+            return Results.Accepted();
+        });
+
+        // Resume after halt. 409 if not halted. Clears HaltReason / WaitingReason / LastTriageError and
+        // resets Failed tasks to Approved with RetryAttempts = 0 regardless of why Ralph halted.
+        grp.MapPost("/{id:guid}/ralph-loop/resume", async (
             Guid id,
             KaguraDbContext db,
             IAgentBroadcaster broadcaster,
@@ -356,14 +373,9 @@ public static class WorkItemEndpoints
                 .FirstOrDefaultAsync(w => w.Id == id, ct);
             if (wi is null) return Results.NotFound();
 
-            if (wi.Status is WorkItemStatus.Closed or WorkItemStatus.PullRequested)
-                return Results.BadRequest(new { error = $"Work item is {wi.Status}; nothing for Ralph to do." });
-
-            if (wi.Tasks.Count == 0)
-                return Results.BadRequest(new { error = "No tasks on this work item." });
-
-            if (wi.Tasks.All(t => t.Status == AgentTaskStatus.Merged))
-                return Results.BadRequest(new { error = "All tasks already merged." });
+            var halted = !wi.RalphLoopActive && wi.RalphLoopHaltReason is not null;
+            if (!halted)
+                return Results.Conflict(new { error = "Ralph Loop is not halted." });
 
             var now = DateTime.UtcNow;
             foreach (var t in wi.Tasks.Where(t => t.Status == AgentTaskStatus.Failed))
@@ -376,6 +388,8 @@ public static class WorkItemEndpoints
 
             wi.RalphLoopActive = true;
             wi.RalphLoopHaltReason = null;
+            wi.RalphLoopWaitingReason = null;
+            wi.LastTriageError = null;
             wi.UpdatedAt = now;
             await db.SaveChangesAsync(ct);
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
@@ -383,8 +397,8 @@ public static class WorkItemEndpoints
             return Results.Accepted();
         });
 
-        // Cancel the loop. Does not kill in-flight agents — they finish their current attempt;
-        // the loop just stops advancing further stages.
+        // Cancel the loop. Does not kill in-flight AgentRuns — they finish naturally; the loop just
+        // stops advancing. Per-run cancel UI handles killing individual runs.
         grp.MapPost("/{id:guid}/ralph-loop/cancel", async (
             Guid id,
             KaguraDbContext db,
@@ -398,6 +412,7 @@ public static class WorkItemEndpoints
 
             wi.RalphLoopActive = false;
             wi.RalphLoopHaltReason = "Cancelled by user.";
+            wi.RalphLoopWaitingReason = null;
             wi.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
@@ -405,114 +420,39 @@ public static class WorkItemEndpoints
             return Results.NoContent();
         });
 
-        return app;
-    }
-
-    private static async Task RunAutoReviewAsync(IServiceScopeFactory scopeFactory, ILogger log, Guid workItemId, Guid runId)
-    {
-        using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
-        var git = scope.ServiceProvider.GetRequiredService<GitService>();
-        var reviewer = scope.ServiceProvider.GetRequiredService<IReviewService>();
-        var broadcaster = scope.ServiceProvider.GetRequiredService<IAgentBroadcaster>();
-        var prompts = scope.ServiceProvider.GetRequiredService<IInteractivePromptService>();
-
-        var wi = await db.WorkItems
-            .Include(w => w.Source)
-            .Include(w => w.Tasks)
-            .FirstOrDefaultAsync(w => w.Id == workItemId);
-        var run = await db.AgentRuns.FirstOrDefaultAsync(r => r.Id == runId);
-        if (wi is null || run is null) return;
-
-        try
+        // Mutate AutoApproveTriage / AutoReviewEnabled at any point. Either field omitted (null) is left unchanged.
+        grp.MapMethods("/{id:guid}/ralph-config", new[] { "PATCH" }, async (
+            Guid id,
+            RalphConfigUpdateDto body,
+            KaguraDbContext db,
+            IAgentBroadcaster broadcaster,
+            CancellationToken ct) =>
         {
-            var queue = wi.Tasks
-                .Where(t => t.Status == AgentTaskStatus.AwaitingReview)
-                .OrderBy(t => t.Order)
-                .ToList();
+            var wi = await db.WorkItems.FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (wi is null) return Results.NotFound();
 
-            var repoPath = wi.Source.LocalRepoPath;
-            var now = DateTime.UtcNow;
-
-            foreach (var task in queue)
+            var changed = false;
+            if (body.AutoApproveTriage is { } autoApprove && wi.AutoApproveTriage != autoApprove)
             {
-                string reasoning;
-                bool autoMerge;
-                try
-                {
-                    var diff = await git.DiffTaskAgainstWorkItemAsync(repoPath, wi, task);
-                    var verdict = await reviewer.ReviewAsync(runId, task.Title, task.Description, diff);
-                    autoMerge = verdict.AutoMerge;
-                    reasoning = verdict.Reasoning;
-                }
-                catch (Exception ex)
-                {
-                    log.LogError(ex, "Auto-review threw for task {TaskId}", task.Id);
-                    autoMerge = false;
-                    reasoning = $"Review failed: {ex.Message}";
-                }
-
-                if (!autoMerge)
-                {
-                    // The LLM said don't auto-merge. Give the user a chance to override — the
-                    // pipeline blocks on AskAsync until POST /api/agents/{runId}/prompts/{id}/respond
-                    // arrives, then resumes. If the user picks "merge", we fall through to the
-                    // merge path with the reasoning preserved as context.
-                    string choice;
-                    try
-                    {
-                        choice = await prompts.AskAsync(
-                            runId,
-                            $"Reviewer flagged '{task.Title}': {reasoning}. Override and merge anyway?",
-                            new[] { "merge", "skip" });
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        choice = "skip";
-                    }
-
-                    if (!string.Equals(choice, "merge", StringComparison.OrdinalIgnoreCase))
-                    {
-                        task.ReviewNotes = reasoning;
-                        task.UpdatedAt = now;
-                        continue;
-                    }
-
-                    reasoning = $"User overrode reviewer ({reasoning}).";
-                }
-
-                try
-                {
-                    var mergeResult = await git.MergeTaskBranchAsync(repoPath, wi, task);
-                    if (!string.IsNullOrEmpty(task.WorktreePath))
-                        await git.RemoveWorktreeAsync(repoPath, task.WorktreePath);
-                    task.Status = AgentTaskStatus.Merged;
-                    task.ReviewNotes = mergeResult.Outcome == MergeOutcome.MergedByAgent
-                        ? $"{reasoning}\n\nConflicts resolved by AI: {mergeResult.Notes}"
-                        : reasoning;
-                    task.UpdatedAt = now;
-                    wi.BranchName ??= git.WorkItemBranchName(wi);
-                }
-                catch (Exception ex)
-                {
-                    log.LogError(ex, "Auto-merge failed for task {TaskId} after positive review", task.Id);
-                    task.ReviewNotes = $"Reviewer approved auto-merge but git merge failed: {ex.Message}";
-                    task.UpdatedAt = now;
-                }
+                wi.AutoApproveTriage = autoApprove;
+                changed = true;
+            }
+            if (body.AutoReviewEnabled is { } autoReview && wi.AutoReviewEnabled != autoReview)
+            {
+                wi.AutoReviewEnabled = autoReview;
+                changed = true;
             }
 
-            wi.UpdatedAt = now;
-            run.Status = AgentRunStatus.Exited;
-            run.EndedAt = DateTime.UtcNow;
-        }
-        catch (Exception ex)
-        {
-            log.LogError(ex, "Auto-review failed for work item {WorkItemId}", workItemId);
-            run.Status = AgentRunStatus.Crashed;
-            run.EndedAt = DateTime.UtcNow;
-        }
+            if (changed)
+            {
+                wi.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                await broadcaster.WorkItemUpdatedAsync(wi.Id);
+            }
 
-        await db.SaveChangesAsync();
-        await broadcaster.WorkItemUpdatedAsync(workItemId);
+            return Results.NoContent();
+        });
+
+        return app;
     }
 }

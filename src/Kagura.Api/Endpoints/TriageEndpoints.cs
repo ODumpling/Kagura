@@ -1,6 +1,6 @@
+using Kagura.Api.Services;
 using Kagura.Core.Agents;
 using Kagura.Core.Domain;
-using Kagura.Core.Triage;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,32 +19,17 @@ public static class TriageEndpoints
         var grp = app.MapGroup("/api/workitems/{workItemId:guid}");
 
         // Fire-and-forget triage. Returns 202 with the new AgentRun's runId immediately;
-        // the background task runs the triage service, persists proposals (or LastTriageError
-        // on parse failure), updates the AgentRun row, and emits workItemUpdated on completion.
+        // the kickoff service persists the AgentRun and spawns the background task that the
+        // Ralph driver also consumes.
         grp.MapPost("/triage", async (
             Guid workItemId,
-            KaguraDbContext db,
-            IServiceScopeFactory scopeFactory,
-            ILogger<Program> log,
+            ITriageKickoffService kickoff,
             CancellationToken ct) =>
         {
-            var wi = await db.WorkItems.FirstOrDefaultAsync(w => w.Id == workItemId, ct);
-            if (wi is null) return Results.NotFound();
-            if (wi.Status == WorkItemStatus.Closed)
-                return Results.BadRequest(new { error = "Work item is closed." });
-
-            var run = new AgentRun
-            {
-                Kind = AgentRunKind.Triage,
-                WorkItemId = wi.Id,
-                Status = AgentRunStatus.Running,
-            };
-            db.AgentRuns.Add(run);
-            await db.SaveChangesAsync(ct);
-
-            _ = Task.Run(() => RunTriageAsync(scopeFactory, log, workItemId, run.Id));
-
-            return Results.Accepted(value: new TriageAcceptedDto(run.Id));
+            var result = await kickoff.KickoffAsync(workItemId, ct);
+            if (result.WorkItemNotFound) return Results.NotFound();
+            if (result.Error is not null) return Results.BadRequest(new { error = result.Error });
+            return Results.Accepted(value: new TriageAcceptedDto(result.RunId!.Value));
         });
 
         grp.MapPost("/triage/approve", async (Guid workItemId, KaguraDbContext db, IAgentBroadcaster broadcaster, CancellationToken ct) =>
@@ -144,60 +129,5 @@ public static class TriageEndpoints
         });
 
         return app;
-    }
-
-    private static async Task RunTriageAsync(IServiceScopeFactory scopeFactory, ILogger log, Guid workItemId, Guid runId)
-    {
-        using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
-        var triage = scope.ServiceProvider.GetRequiredService<ITriageService>();
-        var broadcaster = scope.ServiceProvider.GetRequiredService<IAgentBroadcaster>();
-
-        var wi = await db.WorkItems.Include(w => w.Tasks).FirstOrDefaultAsync(w => w.Id == workItemId);
-        var run = await db.AgentRuns.FirstOrDefaultAsync(r => r.Id == runId);
-        if (wi is null || run is null) return;
-
-        try
-        {
-            var existingTasks = await db.AgentTasks
-                .Where(t => t.WorkItemId == wi.Id)
-                .OrderBy(t => t.Order)
-                .ToListAsync();
-
-            var existing = existingTasks
-                .Where(t => t.Status != AgentTaskStatus.Proposed && t.Status != AgentTaskStatus.Cancelled)
-                .Select(t => new ExistingTask(t.Title, t.Description))
-                .ToList();
-            var proposals = await triage.ProposeTasksAsync(wi.Title, wi.Body, wi.Labels, existing);
-
-            var existingProposed = existingTasks.Where(t => t.Status == AgentTaskStatus.Proposed).ToList();
-            db.AgentTasks.RemoveRange(existingProposed);
-            foreach (var p in proposals)
-            {
-                db.AgentTasks.Add(new AgentTask
-                {
-                    WorkItemId = wi.Id,
-                    Title = p.Title,
-                    Description = p.Description,
-                    Order = p.Order,
-                });
-            }
-
-            wi.LastTriageError = null;
-            wi.UpdatedAt = DateTime.UtcNow;
-            run.Status = AgentRunStatus.Exited;
-            run.EndedAt = DateTime.UtcNow;
-        }
-        catch (Exception ex)
-        {
-            log.LogError(ex, "Triage failed for work item {WorkItemId}", workItemId);
-            wi.LastTriageError = ex.Message;
-            wi.UpdatedAt = DateTime.UtcNow;
-            run.Status = AgentRunStatus.Crashed;
-            run.EndedAt = DateTime.UtcNow;
-        }
-
-        await db.SaveChangesAsync();
-        await broadcaster.WorkItemUpdatedAsync(workItemId);
     }
 }

@@ -41,6 +41,7 @@ public class KaguraDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.ExternalId).IsRequired().HasMaxLength(200);
             e.Property(x => x.Title).IsRequired().HasMaxLength(500);
+            e.Property(x => x.AutoReviewEnabled).HasDefaultValue(true);
             e.HasOne(x => x.Source).WithMany(x => x.WorkItems).HasForeignKey(x => x.SourceId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.SourceId, x.ExternalId }).IsUnique();
         });

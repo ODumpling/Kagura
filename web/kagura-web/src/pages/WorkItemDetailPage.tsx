@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch, Bot, OctagonX, AlertTriangle, ChevronDown, Terminal as TerminalIcon, MessageCircle } from 'lucide-react';
+import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch, Bot, OctagonX, AlertTriangle, ChevronDown, Terminal as TerminalIcon, MessageCircle, Settings, RotateCcw, Hourglass } from 'lucide-react';
 import { api } from '@/api';
 import { getConnection } from '@/signalr';
 import { type AgentRunDto, AgentRunKind, AgentTaskStatus, GrillStatus, type WorkItemDetail, WorkItemStatus, WorkItemStatusLabel } from '@/types';
@@ -15,6 +15,7 @@ import { Markdown } from '@/components/Markdown';
 import { TaskKanban } from '@/components/TaskKanban';
 import { TaskReviewDialog } from '@/components/TaskReviewDialog';
 import { PrPreviewPanel } from '@/components/PrPreviewPanel';
+import { RalphLoopConfigPopover, type RalphLoopConfig } from '@/components/RalphLoopConfigPopover';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -226,10 +227,10 @@ export function WorkItemDetailPage() {
     try { await api.workItems.updateTaskStatus(item!.id, taskId, status); await reload(); }
     catch (e: any) { setError(e.message); await reload(); }
   }
-  async function startRalphLoop() {
+  async function startRalphLoop(config: RalphLoopConfig) {
     if (!item) return;
     setBusy('ralph-start'); setError(null);
-    try { await api.workItems.ralphLoopStart(item.id); await reload(); }
+    try { await api.workItems.ralphLoopStart(item.id, config); await reload(); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
@@ -237,6 +238,20 @@ export function WorkItemDetailPage() {
     if (!item) return;
     setBusy('ralph-cancel'); setError(null);
     try { await api.workItems.ralphLoopCancel(item.id); await reload(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+  async function resumeRalphLoop() {
+    if (!item) return;
+    setBusy('ralph-resume'); setError(null);
+    try { await api.workItems.ralphLoopResume(item.id); await reload(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+  async function applyRalphConfig(config: RalphLoopConfig) {
+    if (!item) return;
+    setBusy('ralph-config'); setError(null);
+    try { await api.workItems.ralphConfig(item.id, config); await reload(); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(null); }
   }
@@ -265,6 +280,9 @@ export function WorkItemDetailPage() {
   const canFinish = !hasRunning && (reviewable > 0 || mergedCount > 0) && item.status !== WorkItemStatus.PullRequested && !isClosed;
 
   const ralphActive = item.ralphLoopActive;
+  const ralphHalted = !ralphActive && !!item.ralphLoopHaltReason;
+  const ralphWaiting = ralphActive && !item.ralphLoopHaltReason && !!item.ralphLoopWaitingReason;
+  const ralphWorking = ralphActive && !item.ralphLoopHaltReason && !item.ralphLoopWaitingReason;
   const allMerged = item.tasks.length > 0 && item.tasks.every(t => t.status === AgentTaskStatus.Merged);
   const canShowRalph =
     !isClosed &&
@@ -272,6 +290,10 @@ export function WorkItemDetailPage() {
     item.tasks.length > 0 &&
     !allMerged &&
     (item.status === WorkItemStatus.Triaged || item.status === WorkItemStatus.InProgress);
+  const ralphConfig: RalphLoopConfig = {
+    autoApproveTriage: item.autoApproveTriage,
+    autoReviewEnabled: item.autoReviewEnabled,
+  };
 
   const ralphCurrent = (() => {
     if (!ralphActive) return null;
@@ -304,16 +326,7 @@ export function WorkItemDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {ralphActive ? (
-            <Button
-              variant="destructive"
-              onClick={cancelRalphLoop}
-              disabled={busy !== null}
-            >
-              {busy === 'ralph-cancel' ? <Loader2 className="animate-spin" /> : <OctagonX />}
-              {busy === 'ralph-cancel' ? 'Cancelling…' : 'Cancel Ralph Loop'}
-            </Button>
-          ) : (
+          {!ralphActive && (
             <>
               <div className="inline-flex">
                 <Button
@@ -352,18 +365,19 @@ export function WorkItemDetailPage() {
                   </DropdownMenu>
                 )}
               </div>
-              {canShowRalph && (
-                <Button
-                  onClick={startRalphLoop}
-                  disabled={busy !== null}
-                >
-                  {busy === 'ralph-start' ? <Loader2 className="animate-spin" /> : <Bot />}
-                  {busy === 'ralph-start'
-                    ? 'Starting…'
-                    : item.ralphLoopHaltReason
-                      ? 'Retry Ralph Loop'
-                      : 'Ralph Loop'}
-                </Button>
+              {canShowRalph && !ralphHalted && (
+                <RalphLoopConfigPopover
+                  mode="start"
+                  initial={ralphConfig}
+                  busy={busy === 'ralph-start'}
+                  onSubmit={startRalphLoop}
+                  trigger={
+                    <Button disabled={busy !== null}>
+                      {busy === 'ralph-start' ? <Loader2 className="animate-spin" /> : <Bot />}
+                      {busy === 'ralph-start' ? 'Starting…' : 'Ralph Loop'}
+                    </Button>
+                  }
+                />
               )}
               {hasProposed && (
                 <Button variant="outline" onClick={approveAll} disabled={busy !== null}>
@@ -411,23 +425,90 @@ export function WorkItemDetailPage() {
         </div>
       )}
 
-      {ralphActive && ralphCurrent && (
-        <div className="rounded-md border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-sm flex items-center gap-2">
-          <Bot className="size-4 animate-pulse" />
-          <span className="font-medium">Ralph Loop:</span>
-          <span>{ralphCurrent.label}</span>
-          <span className="text-muted-foreground text-xs">attempt {ralphCurrent.attempt}/3</span>
+      {(ralphWorking || ralphWaiting) && (
+        <div
+          className={
+            'rounded-md border px-3 py-2 text-sm flex items-start gap-2 ' +
+            (ralphWaiting
+              ? 'border-yellow-500/40 bg-yellow-500/10'
+              : 'border-blue-500/40 bg-blue-500/10')
+          }
+        >
+          {ralphWaiting
+            ? <Hourglass className="size-4 mt-0.5 shrink-0" />
+            : <Bot className="size-4 mt-0.5 shrink-0 animate-pulse" />}
+          <div className="flex-1 flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">
+                {ralphWaiting ? 'Waiting for you:' : 'Ralph is…'}
+              </span>
+              <span>
+                {ralphWaiting
+                  ? item.ralphLoopWaitingReason
+                  : ralphCurrent?.label ?? 'Working…'}
+              </span>
+              {!ralphWaiting && ralphCurrent && (
+                <span className="text-muted-foreground text-xs">attempt {ralphCurrent.attempt}/3</span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <RalphLoopConfigPopover
+              mode="apply"
+              initial={ralphConfig}
+              busy={busy === 'ralph-config'}
+              onSubmit={applyRalphConfig}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={busy !== null}
+                  aria-label="Ralph Loop settings"
+                  title="Ralph Loop settings"
+                >
+                  <Settings />
+                </Button>
+              }
+            />
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={cancelRalphLoop}
+              disabled={busy !== null}
+            >
+              {busy === 'ralph-cancel' ? <Loader2 className="animate-spin" /> : <OctagonX />}
+              {busy === 'ralph-cancel' ? 'Cancelling…' : 'Cancel'}
+            </Button>
+          </div>
         </div>
       )}
 
       <AutoReviewPromptPanel workItemId={item.id} />
 
-      {!ralphActive && item.ralphLoopHaltReason && (
+      {ralphHalted && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm flex items-start gap-2">
           <AlertTriangle className="size-4 mt-0.5 shrink-0" />
           <div className="flex-1">
-            <div className="font-medium">Ralph Loop halted</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{item.ralphLoopHaltReason}</div>
+            <div className="font-medium">Halted: {item.ralphLoopHaltReason}</div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              size="sm"
+              onClick={resumeRalphLoop}
+              disabled={busy !== null}
+            >
+              {busy === 'ralph-resume' ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+              {busy === 'ralph-resume' ? 'Resuming…' : 'Resume Ralph Loop'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={cancelRalphLoop}
+              disabled={busy !== null}
+            >
+              {busy === 'ralph-cancel' ? <Loader2 className="animate-spin" /> : <OctagonX />}
+              Cancel
+            </Button>
           </div>
         </div>
       )}

@@ -94,6 +94,9 @@ export interface WorkItemSummary {
   taskCount: number;
   ralphLoopActive: boolean;
   ralphLoopHaltReason: string | null;
+  ralphLoopWaitingReason: string | null;
+  autoApproveTriage: boolean;
+  autoReviewEnabled: boolean;
 }
 
 export interface AgentTaskDto {
