@@ -35,4 +35,6 @@ public class AgentRun
     public DateTime? EndedAt { get; set; }
 
     public string TranscriptLogPath { get; set; } = "";
+
+    public List<AutoReviewInteraction> Interactions { get; set; } = new();
 }

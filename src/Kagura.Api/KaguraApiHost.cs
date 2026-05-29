@@ -200,6 +200,7 @@ public static class KaguraApiHost
         app.MapGrillEndpoints();
         app.MapAgentEndpoints();
         app.MapReviewPromptEndpoints();
+        app.MapAutoReviewInteractionEndpoints();
         app.MapHub<AgentHub>("/hubs/agent");
 
         // Dedicated identification probe used by `kagura stop` to verify the listener
