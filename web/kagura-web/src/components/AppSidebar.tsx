@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { FileText, GitMerge, GitBranch, FolderGit2, ListTodo, RefreshCw, Plus, Settings, Bot, X, AlertCircle, Loader2, Flame, ShieldCheck, GitPullRequestArrow, Wand2 } from 'lucide-react';
+import { FileText, GitMerge, GitBranch, FolderGit2, ListTodo, RefreshCw, Plus, Settings, Bot, X, AlertCircle, Loader2, Flame, ShieldCheck, GitPullRequestArrow, Wand2, ScrollText } from 'lucide-react';
 import { useAgentSessions } from '@/contexts/AgentSessionsContext';
 import { useSidebarAgents, type SidebarAgent } from '@/contexts/SidebarAgentsContext';
 import {
@@ -71,6 +71,16 @@ export function AppSidebar() {
                           {active.length}
                         </span>
                       )}
+                    </SidebarMenuButton>
+                  )}
+                </NavLink>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <NavLink to="/prompts">
+                  {({ isActive }) => (
+                    <SidebarMenuButton isActive={isActive} tooltip="Prompts">
+                      <ScrollText />
+                      <span>Prompts</span>
                     </SidebarMenuButton>
                   )}
                 </NavLink>
