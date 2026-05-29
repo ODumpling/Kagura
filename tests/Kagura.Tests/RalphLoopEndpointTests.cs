@@ -18,14 +18,18 @@ public class RalphLoopEndpointTests : IClassFixture<RalphLoopEndpointTests.AppFa
 
     public RalphLoopEndpointTests(AppFactory app) => _app = app;
 
+    private static readonly RalphLoopActivationDto DefaultActivation =
+        new(AutoApproveTriage: false, AutoReviewEnabled: true);
+
     [Fact]
-    public async Task POST_ralph_loop_flips_flag_and_clears_halt_reason()
+    public async Task POST_ralph_loop_activates_with_body_flags()
     {
-        var wiId = await SeedAsync(taskCount: 2, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved,
-            ralphHalt: "previous halt reason");
+        var wiId = await SeedAsync(taskCount: 2, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved);
 
         using var client = _app.CreateClient();
-        var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop", null);
+        var resp = await client.PostAsJsonAsync(
+            $"/api/workitems/{wiId}/ralph-loop",
+            new RalphLoopActivationDto(AutoApproveTriage: true, AutoReviewEnabled: false));
 
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
@@ -33,80 +37,161 @@ public class RalphLoopEndpointTests : IClassFixture<RalphLoopEndpointTests.AppFa
         var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
         var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
         Assert.True(wi.RalphLoopActive);
-        Assert.Null(wi.RalphLoopHaltReason);
+        Assert.True(wi.AutoApproveTriage);
+        Assert.False(wi.AutoReviewEnabled);
     }
 
-    [Fact]
-    public async Task POST_ralph_loop_resets_Failed_tasks_to_Approved()
+    [Theory]
+    [InlineData(WorkItemStatus.New)]
+    [InlineData(WorkItemStatus.Triaged)]
+    [InlineData(WorkItemStatus.InProgress)]
+    [InlineData(WorkItemStatus.Merged)]
+    public async Task POST_ralph_loop_allows_entry_states(WorkItemStatus status)
     {
-        var wiId = await SeedAsync(taskCount: 2, status: WorkItemStatus.InProgress, taskStatus: AgentTaskStatus.Approved);
-        using (var s = _app.Services.CreateScope())
-        {
-            var db = s.ServiceProvider.GetRequiredService<KaguraDbContext>();
-            var failed = await db.AgentTasks.Where(t => t.WorkItemId == wiId).FirstAsync();
-            failed.Status = AgentTaskStatus.Failed;
-            failed.RetryAttempts = 3;
-            failed.LastFailureReason = "old crash";
-            await db.SaveChangesAsync();
-        }
+        var wiId = await SeedAsync(taskCount: 1, status: status, taskStatus: AgentTaskStatus.Approved);
 
         using var client = _app.CreateClient();
-        var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop", null);
+        var resp = await client.PostAsJsonAsync($"/api/workitems/{wiId}/ralph-loop", DefaultActivation);
+
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
-
-        using var scope = _app.Services.CreateScope();
-        var db2 = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
-        var tasks = await db2.AgentTasks.Where(t => t.WorkItemId == wiId).ToListAsync();
-        Assert.All(tasks, t => Assert.Equal(AgentTaskStatus.Approved, t.Status));
-        Assert.All(tasks, t => Assert.Equal(0, t.RetryAttempts));
-        Assert.All(tasks, t => Assert.Null(t.LastFailureReason));
     }
 
-    [Fact]
-    public async Task POST_ralph_loop_accepts_work_item_with_more_than_three_tasks()
+    [Theory]
+    [InlineData(WorkItemStatus.PullRequested)]
+    [InlineData(WorkItemStatus.Cancelled)]
+    [InlineData(WorkItemStatus.Closed)]
+    [InlineData(WorkItemStatus.Done)]
+    public async Task POST_ralph_loop_rejects_terminal_states(WorkItemStatus status)
     {
-        var wiId = await SeedAsync(taskCount: 5, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved);
+        var wiId = await SeedAsync(taskCount: 1, status: status, taskStatus: AgentTaskStatus.Merged);
 
         using var client = _app.CreateClient();
-        var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop", null);
-        Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
+        var resp = await client.PostAsJsonAsync($"/api/workitems/{wiId}/ralph-loop", DefaultActivation);
 
-        using var scope = _app.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
-        var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
-        Assert.True(wi.RalphLoopActive);
-    }
-
-    [Fact]
-    public async Task POST_ralph_loop_rejects_PullRequested_work_item()
-    {
-        var wiId = await SeedAsync(taskCount: 2, status: WorkItemStatus.PullRequested, taskStatus: AgentTaskStatus.Merged);
-
-        using var client = _app.CreateClient();
-        var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop", null);
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
     [Fact]
-    public async Task POST_ralph_loop_rejects_when_all_tasks_already_merged()
+    public async Task POST_ralph_loop_returns_409_when_already_active()
     {
-        var wiId = await SeedAsync(taskCount: 2, status: WorkItemStatus.Merged, taskStatus: AgentTaskStatus.Merged);
-
-        using var client = _app.CreateClient();
-        var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop", null);
-        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
-    }
-
-    [Fact]
-    public async Task POST_cancel_clears_flag_and_sets_halt_reason()
-    {
-        var wiId = await SeedAsync(taskCount: 2, status: WorkItemStatus.InProgress, taskStatus: AgentTaskStatus.Running);
+        var wiId = await SeedAsync(taskCount: 1, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved);
         using (var s = _app.Services.CreateScope())
         {
             var db = s.ServiceProvider.GetRequiredService<KaguraDbContext>();
             var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
             wi.RalphLoopActive = true;
             await db.SaveChangesAsync();
+        }
+
+        using var client = _app.CreateClient();
+        var resp = await client.PostAsJsonAsync($"/api/workitems/{wiId}/ralph-loop", DefaultActivation);
+
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task POST_ralph_loop_returns_400_when_grill_active()
+    {
+        var wiId = await SeedAsync(taskCount: 1, status: WorkItemStatus.New, taskStatus: AgentTaskStatus.Proposed);
+        using (var s = _app.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<KaguraDbContext>();
+            var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
+            wi.GrillStatus = GrillStatus.Active;
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _app.CreateClient();
+        var resp = await client.PostAsJsonAsync($"/api/workitems/{wiId}/ralph-loop", DefaultActivation);
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task POST_resume_clears_halt_waiting_triage_error_and_resets_failed_tasks()
+    {
+        var wiId = await SeedAsync(taskCount: 3, status: WorkItemStatus.InProgress, taskStatus: AgentTaskStatus.Approved);
+        using (var s = _app.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<KaguraDbContext>();
+            var wi = await db.WorkItems.Include(w => w.Tasks).SingleAsync(w => w.Id == wiId);
+            wi.RalphLoopActive = false;
+            wi.RalphLoopHaltReason = "Auto-review flagged 2 task(s) for human review.";
+            wi.RalphLoopWaitingReason = "Waiting for you to review tasks.";
+            wi.LastTriageError = "boom";
+            var failed = wi.Tasks.First();
+            failed.Status = AgentTaskStatus.Failed;
+            failed.RetryAttempts = 5;
+            failed.LastFailureReason = "old crash";
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _app.CreateClient();
+        var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop/resume", null);
+        Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
+
+        using var scope = _app.Services.CreateScope();
+        var db2 = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
+        var wi2 = await db2.WorkItems.Include(w => w.Tasks).SingleAsync(w => w.Id == wiId);
+        Assert.True(wi2.RalphLoopActive);
+        Assert.Null(wi2.RalphLoopHaltReason);
+        Assert.Null(wi2.RalphLoopWaitingReason);
+        Assert.Null(wi2.LastTriageError);
+        Assert.All(wi2.Tasks, t =>
+        {
+            Assert.Equal(AgentTaskStatus.Approved, t.Status);
+            Assert.Equal(0, t.RetryAttempts);
+            Assert.Null(t.LastFailureReason);
+        });
+    }
+
+    [Fact]
+    public async Task POST_resume_returns_409_when_not_halted()
+    {
+        var wiId = await SeedAsync(taskCount: 1, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved);
+
+        using var client = _app.CreateClient();
+        var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop/resume", null);
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task POST_resume_returns_409_when_active()
+    {
+        var wiId = await SeedAsync(taskCount: 1, status: WorkItemStatus.InProgress, taskStatus: AgentTaskStatus.Running);
+        using (var s = _app.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<KaguraDbContext>();
+            var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
+            wi.RalphLoopActive = true;
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _app.CreateClient();
+        var resp = await client.PostAsync($"/api/workitems/{wiId}/ralph-loop/resume", null);
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task POST_cancel_clears_flag_and_sets_halt_reason_without_killing_runs()
+    {
+        var wiId = await SeedAsync(taskCount: 2, status: WorkItemStatus.InProgress, taskStatus: AgentTaskStatus.Running);
+        Guid runId;
+        using (var s = _app.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<KaguraDbContext>();
+            var wi = await db.WorkItems.Include(w => w.Tasks).SingleAsync(w => w.Id == wiId);
+            wi.RalphLoopActive = true;
+            var run = new AgentRun
+            {
+                Kind = AgentRunKind.TaskAgent,
+                WorkItemId = wi.Id,
+                AgentTaskId = wi.Tasks.First().Id,
+                Status = AgentRunStatus.Running,
+            };
+            db.AgentRuns.Add(run);
+            await db.SaveChangesAsync();
+            runId = run.Id;
         }
 
         using var client = _app.CreateClient();
@@ -118,6 +203,9 @@ public class RalphLoopEndpointTests : IClassFixture<RalphLoopEndpointTests.AppFa
         var wi2 = await db2.WorkItems.SingleAsync(w => w.Id == wiId);
         Assert.False(wi2.RalphLoopActive);
         Assert.Equal("Cancelled by user.", wi2.RalphLoopHaltReason);
+        var run2 = await db2.AgentRuns.SingleAsync(r => r.Id == runId);
+        Assert.Equal(AgentRunStatus.Running, run2.Status);
+        Assert.Null(run2.EndedAt);
     }
 
     [Fact]
@@ -133,7 +221,61 @@ public class RalphLoopEndpointTests : IClassFixture<RalphLoopEndpointTests.AppFa
         var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
         var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
         Assert.False(wi.RalphLoopActive);
-        Assert.Null(wi.RalphLoopHaltReason); // not set since loop wasn't active
+        Assert.Null(wi.RalphLoopHaltReason);
+    }
+
+    [Fact]
+    public async Task PATCH_ralph_config_updates_both_flags()
+    {
+        var wiId = await SeedAsync(taskCount: 1, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved);
+
+        using var client = _app.CreateClient();
+        var resp = await client.PatchAsJsonAsync(
+            $"/api/workitems/{wiId}/ralph-config",
+            new RalphConfigUpdateDto(AutoApproveTriage: true, AutoReviewEnabled: false));
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+
+        using var scope = _app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
+        var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
+        Assert.True(wi.AutoApproveTriage);
+        Assert.False(wi.AutoReviewEnabled);
+    }
+
+    [Fact]
+    public async Task PATCH_ralph_config_leaves_unspecified_flag_untouched()
+    {
+        var wiId = await SeedAsync(taskCount: 1, status: WorkItemStatus.Triaged, taskStatus: AgentTaskStatus.Approved);
+        using (var s = _app.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<KaguraDbContext>();
+            var wi = await db.WorkItems.SingleAsync(w => w.Id == wiId);
+            wi.AutoApproveTriage = true;
+            wi.AutoReviewEnabled = true;
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _app.CreateClient();
+        var resp = await client.PatchAsJsonAsync(
+            $"/api/workitems/{wiId}/ralph-config",
+            new RalphConfigUpdateDto(AutoApproveTriage: null, AutoReviewEnabled: false));
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+
+        using var scope = _app.Services.CreateScope();
+        var db2 = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
+        var wi2 = await db2.WorkItems.SingleAsync(w => w.Id == wiId);
+        Assert.True(wi2.AutoApproveTriage);
+        Assert.False(wi2.AutoReviewEnabled);
+    }
+
+    [Fact]
+    public async Task PATCH_ralph_config_returns_404_for_unknown_work_item()
+    {
+        using var client = _app.CreateClient();
+        var resp = await client.PatchAsJsonAsync(
+            $"/api/workitems/{Guid.NewGuid()}/ralph-config",
+            new RalphConfigUpdateDto(true, true));
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
@@ -179,6 +321,10 @@ public class RalphLoopEndpointTests : IClassFixture<RalphLoopEndpointTests.AppFa
     }
 
     private record WorkItemDetailDtoLocal(Guid Id, bool RalphLoopActive, string? RalphLoopHaltReason);
+
+    private record RalphLoopActivationDto(bool AutoApproveTriage, bool AutoReviewEnabled);
+
+    private record RalphConfigUpdateDto(bool? AutoApproveTriage, bool? AutoReviewEnabled);
 
     public sealed class AppFactory : WebApplicationFactory<Program>
     {
