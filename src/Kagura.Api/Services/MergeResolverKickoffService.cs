@@ -9,11 +9,12 @@ namespace Kagura.Api.Services;
 
 /// <summary>
 /// Per issue #66: bridges the singleton <see cref="GitService"/> into the scoped DI world
-/// long enough to spawn a MergeResolver PTY Agent. When <see cref="BeginAsync"/> is invoked
-/// at the moment a merge hits conflicts, this service creates an <see cref="AgentRun"/>
-/// row for the work item, pushes its <see cref="AgentRun.Id"/> and the WorkItem onto the
-/// ambient <see cref="MergeResolverAgentContext"/>, and returns a disposer that pops the
-/// ambient when the resolver call completes (success or failure).
+/// long enough to spawn a MergeResolver PTY Agent. <see cref="ResolveAsync"/> creates the
+/// <see cref="AgentRun"/> row, pushes its id and the WorkItem onto the ambient
+/// <see cref="MergeResolverAgentContext"/>, invokes the resolver, and pops the ambient
+/// on the way out — all inside a single async frame so the AsyncLocal context is actually
+/// visible to the resolver call (AsyncLocal mutations only flow downstream, not back to
+/// the caller of an awaited async method).
 ///
 /// The AgentRun row's terminal status (Exited / Killed / Crashed) is filled in by
 /// <c>AgentRunSink.RecordExitAsync</c> on PTY exit — so we deliberately do NOT update it
@@ -23,19 +24,35 @@ public sealed class MergeResolverKickoffService : IMergeResolverKickoff
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly MergeResolverAgentContext _context;
+    private readonly IMergeConflictResolver _resolver;
     private readonly ILogger<MergeResolverKickoffService> _log;
 
     public MergeResolverKickoffService(
         IServiceScopeFactory scopeFactory,
         MergeResolverAgentContext context,
+        IMergeConflictResolver resolver,
         ILogger<MergeResolverKickoffService> log)
     {
         _scopeFactory = scopeFactory;
         _context = context;
+        _resolver = resolver;
         _log = log;
     }
 
-    public async Task<IAsyncDisposable> BeginAsync(WorkItem wi, AgentTask task, CancellationToken ct)
+    public async Task<MergeResolutionResult> ResolveAsync(
+        WorkItem wi, AgentTask task, string worktreePath, CancellationToken ct)
+    {
+        var (runId, prompt) = await AllocateRunAsync(wi, task, ct);
+
+        // Push the ambient context in THIS async frame so the resolver — which runs inside
+        // the same frame via the await below — actually sees it. The context is popped on
+        // dispose at the end of this method, regardless of whether the resolver throws.
+        using var _ = _context.Push(wi, runId, prompt);
+        return await _resolver.ResolveAsync(worktreePath, task.Title, ct);
+    }
+
+    private async Task<(Guid RunId, string Prompt)> AllocateRunAsync(
+        WorkItem wi, AgentTask task, CancellationToken ct)
     {
         // Allocate the AgentRun row and snapshot the resolved prompt in our own scope so the
         // DbContext / scoped IPromptSnapshotSink are short-lived. The PTY agent then opens
@@ -65,18 +82,6 @@ public sealed class MergeResolverKickoffService : IMergeResolverKickoff
             "Allocated MergeResolver AgentRun {RunId} for work item {WorkItemId} / task {TaskId}",
             run.Id, wi.Id, task.Id);
 
-        var pop = _context.Push(wi, run.Id, prompt);
-        return new Disposer(pop);
-    }
-
-    private sealed class Disposer : IAsyncDisposable
-    {
-        private readonly IDisposable _pop;
-        public Disposer(IDisposable pop) => _pop = pop;
-        public ValueTask DisposeAsync()
-        {
-            _pop.Dispose();
-            return ValueTask.CompletedTask;
-        }
+        return (run.Id, prompt);
     }
 }
