@@ -29,7 +29,7 @@ export function WorkItemsPage() {
   const statusParam = searchParams.get('status') ?? 'active';
   const status = /^\d+$/.test(statusParam) ? (Number(statusParam) as WorkItemStatus) : undefined;
   const includeClosed = statusParam === 'all';
-  const { sources } = useSources();
+  const { sources, syncVersion } = useSources();
 
   const activeSource = useMemo(
     () => sources.find(s => s.id === sourceId),
@@ -38,7 +38,7 @@ export function WorkItemsPage() {
 
   useEffect(() => {
     api.workItems.list(sourceId, status, includeClosed).then(setItems).catch(e => setError(e.message));
-  }, [sourceId, status, includeClosed]);
+  }, [sourceId, status, includeClosed, syncVersion]);
 
   function clearSourceFilter() {
     searchParams.delete('sourceId');
