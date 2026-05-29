@@ -40,15 +40,18 @@ public class ClaudeCliReviewService : IReviewService
     private readonly ReviewOptions _options;
     private readonly ILogger<ClaudeCliReviewService> _log;
 
-    public ClaudeCliReviewService(IOptions<ReviewOptions> options, ILogger<ClaudeCliReviewService> log)
+    public ClaudeCliReviewService(
+        IOptions<ReviewOptions> options,
+        ILogger<ClaudeCliReviewService> log)
     {
         _options = options.Value;
         _log = log;
     }
 
     public async Task<ReviewVerdict> ReviewAsync(
-        string taskTitle, string taskDescription, string diff, CancellationToken ct = default)
+        Guid runId, string taskTitle, string taskDescription, string diff, CancellationToken ct = default)
     {
+        _ = runId;
         if (string.IsNullOrWhiteSpace(diff))
             return new ReviewVerdict(false, "Diff was empty — nothing to review.");
 

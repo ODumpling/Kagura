@@ -21,6 +21,7 @@ public class KaguraDbContext : DbContext
     public DbSet<AgentTask> AgentTasks => Set<AgentTask>();
     public DbSet<AgentRun> AgentRuns => Set<AgentRun>();
     public DbSet<WorkItemComment> WorkItemComments => Set<WorkItemComment>();
+    public DbSet<AutoReviewInteraction> AutoReviewInteractions => Set<AutoReviewInteraction>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -68,6 +69,18 @@ public class KaguraDbContext : DbContext
             e.Property(x => x.Content).IsRequired();
             e.HasOne(x => x.WorkItem).WithMany(x => x.Comments).HasForeignKey(x => x.WorkItemId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.WorkItemId, x.CreatedAt });
+        });
+
+        mb.Entity<AutoReviewInteraction>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Ignore(x => x.IsPending);
+            e.Property(x => x.Prompt).IsRequired();
+            e.HasOne(x => x.AgentRun).WithMany(x => x.Interactions).HasForeignKey(x => x.AgentRunId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.WorkItem).WithMany(x => x.AutoReviewInteractions).HasForeignKey(x => x.WorkItemId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.AgentTask).WithMany().HasForeignKey(x => x.AgentTaskId).OnDelete(DeleteBehavior.SetNull).IsRequired(false);
+            e.HasIndex(x => new { x.AgentRunId, x.Sequence });
+            e.HasIndex(x => x.WorkItemId);
         });
     }
 }

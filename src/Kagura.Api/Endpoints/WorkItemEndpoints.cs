@@ -1,6 +1,7 @@
 using Kagura.Core.Agents;
 using Kagura.Core.Domain;
 using Kagura.Core.Git;
+using Kagura.Core.Interactive;
 using Kagura.Core.Review;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
@@ -414,6 +415,7 @@ public static class WorkItemEndpoints
         var git = scope.ServiceProvider.GetRequiredService<GitService>();
         var reviewer = scope.ServiceProvider.GetRequiredService<IReviewService>();
         var broadcaster = scope.ServiceProvider.GetRequiredService<IAgentBroadcaster>();
+        var prompts = scope.ServiceProvider.GetRequiredService<IInteractivePromptService>();
 
         var wi = await db.WorkItems
             .Include(w => w.Source)
@@ -439,7 +441,7 @@ public static class WorkItemEndpoints
                 try
                 {
                     var diff = await git.DiffTaskAgainstWorkItemAsync(repoPath, wi, task);
-                    var verdict = await reviewer.ReviewAsync(task.Title, task.Description, diff);
+                    var verdict = await reviewer.ReviewAsync(runId, task.Title, task.Description, diff);
                     autoMerge = verdict.AutoMerge;
                     reasoning = verdict.Reasoning;
                 }
@@ -452,9 +454,31 @@ public static class WorkItemEndpoints
 
                 if (!autoMerge)
                 {
-                    task.ReviewNotes = reasoning;
-                    task.UpdatedAt = now;
-                    continue;
+                    // The LLM said don't auto-merge. Give the user a chance to override — the
+                    // pipeline blocks on AskAsync until POST /api/agents/{runId}/prompts/{id}/respond
+                    // arrives, then resumes. If the user picks "merge", we fall through to the
+                    // merge path with the reasoning preserved as context.
+                    string choice;
+                    try
+                    {
+                        choice = await prompts.AskAsync(
+                            runId,
+                            $"Reviewer flagged '{task.Title}': {reasoning}. Override and merge anyway?",
+                            new[] { "merge", "skip" });
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        choice = "skip";
+                    }
+
+                    if (!string.Equals(choice, "merge", StringComparison.OrdinalIgnoreCase))
+                    {
+                        task.ReviewNotes = reasoning;
+                        task.UpdatedAt = now;
+                        continue;
+                    }
+
+                    reasoning = $"User overrode reviewer ({reasoning}).";
                 }
 
                 try

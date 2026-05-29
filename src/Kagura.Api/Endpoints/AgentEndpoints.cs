@@ -1,11 +1,16 @@
 using Kagura.Core.Agents;
 using Kagura.Core.Domain;
+using Kagura.Core.Interactive;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Kagura.Api.Endpoints;
 
 public record StartAgentDto(Guid TaskId);
+
+public record PromptAnswerDto(string Answer);
+
+public record PendingPromptDto(Guid Id, Guid RunId, string Question, IReadOnlyList<string>? Choices, DateTime CreatedAt);
 
 public record AgentRunDto(
     Guid RunId,
@@ -81,6 +86,28 @@ public static class AgentEndpoints
             }
 
             return Results.Accepted(value: new { queued = taskIds.Count });
+        });
+
+        // List the pending prompts a run is currently blocked on. Used by clients that join
+        // late — the broadcaster has already fired the `prompt` event and would otherwise
+        // skip them.
+        grp.MapGet("/{runId:guid}/prompts", (Guid runId, IInteractivePromptService prompts) =>
+            Results.Ok(prompts.GetPending(runId)
+                .Select(p => new PendingPromptDto(p.Id, p.RunId, p.Question, p.Choices, p.CreatedAt))));
+
+        // User response to an interactive prompt. Resolves the awaited AskAsync inside the
+        // auto-review pipeline so it can resume. Returns 404 once the prompt has been
+        // answered, cancelled, or never existed.
+        grp.MapPost("/{runId:guid}/prompts/{promptId:guid}/respond", (
+            Guid runId,
+            Guid promptId,
+            PromptAnswerDto dto,
+            IInteractivePromptService prompts) =>
+        {
+            _ = runId;
+            return prompts.TryAnswer(promptId, dto.Answer)
+                ? Results.NoContent()
+                : Results.NotFound(new { error = "Prompt is not pending." });
         });
 
         // Releases the in-memory session (and its ring buffer for non-task kinds). Refuses

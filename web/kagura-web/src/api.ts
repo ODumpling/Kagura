@@ -2,6 +2,7 @@ import type {
   Source, UpsertSource, WorkItemSummary, WorkItemDetail, AgentTaskDto, AgentRunDto,
   FinishWorkItemResult, WorkItemPreview, AutoReviewResult,
   GrillState, WorkItemComment, FinalizeGrillResult,
+  ReviewPrompt, ReviewPromptResponse,
 } from './types';
 
 const API = import.meta.env.VITE_API ?? 'http://localhost:5253';
@@ -82,6 +83,17 @@ export const api = {
       http<FinalizeGrillResult>('POST', `/api/workitems/${workItemId}/grill/finalize`),
     reset: (workItemId: string) =>
       http<void>('POST', `/api/workitems/${workItemId}/grill/reset`),
+  },
+
+  reviewPrompts: {
+    list: (workItemId: string) =>
+      http<ReviewPrompt[]>('GET', `/api/workitems/${workItemId}/auto-review/prompts`),
+    respond: (workItemId: string, promptId: string, selectedOptionId: string, notes?: string | null) =>
+      http<ReviewPromptResponse>(
+        'POST',
+        `/api/workitems/${workItemId}/auto-review/prompts/${promptId}/respond`,
+        { selectedOptionId, notes: notes ?? null },
+      ),
   },
 
   agents: {

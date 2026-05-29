@@ -4,6 +4,7 @@ using Kagura.Api.Hubs;
 using Kagura.Core.Agents;
 using Kagura.Core.Git;
 using Kagura.Core.Grill;
+using Kagura.Core.Interactive;
 using Kagura.Core.Merge;
 using Kagura.Core.Review;
 using Kagura.Core.Sources;
@@ -102,6 +103,8 @@ public static class KaguraApiHost
             opt.Model = builder.Configuration["Review:Model"];
         });
         builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
+        builder.Services.AddSingleton<IReviewPromptCoordinator, InMemoryReviewPromptCoordinator>();
+        builder.Services.AddHostedService<ReviewPromptBroadcaster>();
 
         builder.Services.Configure<GrillOptions>(opt =>
         {
@@ -133,6 +136,7 @@ public static class KaguraApiHost
             MaxRunDuration = devflow.GetValue<TimeSpan?>("MaxRunDuration") ?? TimeSpan.FromMinutes(30),
         });
         builder.Services.AddSingleton<IAgentBroadcaster, SignalRAgentBroadcaster>();
+        builder.Services.AddSingleton<IInteractivePromptService, InteractivePromptService>();
         builder.Services.AddSingleton<IAgentRunner, AgentRunner>();
         builder.Services.AddScoped<IAgentRunSink, AgentRunSink>();
 
@@ -195,6 +199,8 @@ public static class KaguraApiHost
         app.MapTriageEndpoints();
         app.MapGrillEndpoints();
         app.MapAgentEndpoints();
+        app.MapReviewPromptEndpoints();
+        app.MapAutoReviewInteractionEndpoints();
         app.MapHub<AgentHub>("/hubs/agent");
 
         // Dedicated identification probe used by `kagura stop` to verify the listener
