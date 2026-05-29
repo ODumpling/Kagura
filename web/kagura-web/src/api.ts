@@ -3,6 +3,7 @@ import type {
   FinishWorkItemResult, WorkItemPreview, AutoReviewResult,
   GrillState, WorkItemComment, FinalizeGrillResult,
   ReviewPrompt, ReviewPromptResponse,
+  RolePrompt, Role,
 } from './types';
 
 const API = import.meta.env.VITE_API ?? 'http://localhost:5253';
@@ -32,6 +33,12 @@ export const api = {
     remove: (id: string) => http<void>('DELETE', `/api/sources/${id}`),
     sync: (id: string) => http<{ added: number; updated: number; total: number }>('POST', `/api/sources/${id}/sync`),
     syncAll: () => http<unknown[]>('POST', '/api/sources/sync-all'),
+    listPrompts: (id: string) =>
+      http<RolePrompt[]>('GET', `/api/sources/${id}/prompts`),
+    setPrompt: (id: string, role: Role, promptText: string) =>
+      http<RolePrompt>('PUT', `/api/sources/${id}/prompts/${role}`, { promptText }),
+    resetPrompt: (id: string, role: Role) =>
+      http<RolePrompt>('DELETE', `/api/sources/${id}/prompts/${role}`),
   },
 
   workItems: {

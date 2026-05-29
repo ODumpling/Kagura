@@ -15,7 +15,14 @@ public class MergeResolverOptions
 
 public class ClaudeCliMergeResolver : IMergeConflictResolver
 {
-    private const string SystemPrompt =
+    /// <summary>
+    /// Built-in MergeResolver prompt. Surfaced as the lazy default in
+    /// <see cref="Kagura.Core.Agents.RolePromptDefaults"/> so the Source's "Prompts" tab can
+    /// render it even though MergeResolver hasn't been migrated to the PTY-Agent path yet
+    /// (that's #70's job). When MergeResolver is migrated this constant becomes the template
+    /// resolved by <c>PromptResolver</c> at Agent spawn time.
+    /// </summary>
+    public const string DefaultPromptTemplate =
         """
         You are a git merge-conflict resolver. The working directory is a git worktree
         in the middle of a `git merge` that hit conflicts. Your only job is to resolve
@@ -34,6 +41,8 @@ public class ClaudeCliMergeResolver : IMergeConflictResolver
         Reply with ONLY a JSON object as your final output, no prose, no markdown fences:
         {"success": true|false, "notes": "1-3 sentences describing what you did or why you gave up"}
         """;
+
+    private const string SystemPrompt = DefaultPromptTemplate;
 
     private readonly MergeResolverOptions _options;
     private readonly ILogger<ClaudeCliMergeResolver> _log;

@@ -16,9 +16,16 @@ public class GrillOptions
 
 public class ClaudeCliGrillService : IGrillService
 {
+    /// <summary>
+    /// Built-in Grill prompt. Surfaced as the lazy default in
+    /// <see cref="Kagura.Core.Agents.RolePromptDefaults"/> so the Source's "Prompts" tab can
+    /// render it even though Grill hasn't been migrated to the PTY-Agent path yet
+    /// (that's #66's job). When Grill is migrated this constant becomes the template
+    /// resolved by <c>PromptResolver</c> at Agent spawn time.
+    /// </summary>
     // Adapted from the grill-me skill: interview one question at a time, each with a
     // "My take:" recommendation, until the issue is fleshed out enough to act on.
-    private const string GrillSystemPrompt =
+    public const string DefaultPromptTemplate =
         """
         You are interviewing the user about a software work item that was imported from a tracker
         and needs more detail before it can be acted on. Your job is to grill them relentlessly
@@ -105,7 +112,7 @@ public class ClaudeCliGrillService : IGrillService
              If the user's latest reply finished the grilling, write the summary recap instead.
              """;
 
-        return InvokeClaudeAsync(GrillSystemPrompt, userPrompt, ct);
+        return InvokeClaudeAsync(DefaultPromptTemplate, userPrompt, ct);
     }
 
     public Task<string> SynthesizeAsync(

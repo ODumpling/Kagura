@@ -3,6 +3,7 @@ using System;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Kagura.Data.Migrations
 {
     [DbContext(typeof(KaguraDbContext))]
-    partial class KaguraDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260529141321_AddSourcePromptOverrides")]
+    partial class AddSourcePromptOverrides
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");

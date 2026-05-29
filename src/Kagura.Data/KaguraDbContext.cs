@@ -22,6 +22,7 @@ public class KaguraDbContext : DbContext
     public DbSet<AgentRun> AgentRuns => Set<AgentRun>();
     public DbSet<WorkItemComment> WorkItemComments => Set<WorkItemComment>();
     public DbSet<AutoReviewInteraction> AutoReviewInteractions => Set<AutoReviewInteraction>();
+    public DbSet<SourcePromptOverride> SourcePromptOverrides => Set<SourcePromptOverride>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -82,6 +83,15 @@ public class KaguraDbContext : DbContext
             e.HasOne(x => x.AgentTask).WithMany().HasForeignKey(x => x.AgentTaskId).OnDelete(DeleteBehavior.SetNull).IsRequired(false);
             e.HasIndex(x => new { x.AgentRunId, x.Sequence });
             e.HasIndex(x => x.WorkItemId);
+        });
+
+        mb.Entity<SourcePromptOverride>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.PromptText).IsRequired();
+            e.HasOne(x => x.Source).WithMany(x => x.PromptOverrides).HasForeignKey(x => x.SourceId).OnDelete(DeleteBehavior.Cascade);
+            // (SourceId, Role) is unique per ADR 0002 — at most one override row per (Source, Role).
+            e.HasIndex(x => new { x.SourceId, x.Role }).IsUnique();
         });
     }
 }

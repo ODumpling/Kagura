@@ -12,4 +12,11 @@ public class Source
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public List<WorkItem> WorkItems { get; set; } = new();
+
+    /// <summary>
+    /// Per-Role prompt overrides for this Source (ADR 0002). Each row replaces the built-in
+    /// default for that Role at Agent spawn time. Absence of a row for a given Role means the
+    /// current built-in default is used (lazy lookup, not a one-time copy).
+    /// </summary>
+    public List<SourcePromptOverride> PromptOverrides { get; set; } = new();
 }

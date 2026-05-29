@@ -86,6 +86,7 @@ public class ClaudeCliTriageService : ITriageService
     private readonly IAgentRunner _runner;
     private readonly GitService _git;
     private readonly IPromptSnapshotSink _promptSink;
+    private readonly IPromptResolver _promptResolver;
     private readonly ILogger<ClaudeCliTriageService> _log;
 
     public ClaudeCliTriageService(
@@ -94,6 +95,7 @@ public class ClaudeCliTriageService : ITriageService
         IAgentRunner runner,
         GitService git,
         IPromptSnapshotSink promptSink,
+        IPromptResolver promptResolver,
         ILogger<ClaudeCliTriageService> log)
     {
         _options = options.Value;
@@ -101,6 +103,7 @@ public class ClaudeCliTriageService : ITriageService
         _runner = runner;
         _git = git;
         _promptSink = promptSink;
+        _promptResolver = promptResolver;
         _log = log;
     }
 
@@ -130,7 +133,11 @@ public class ClaudeCliTriageService : ITriageService
         // worktree on detached HEAD at the default branch. Refresh on every spawn.
         var cwd = await _git.EnsureScratchWorktreeAsync(wi.Source, ct);
 
-        var prompt = RenderPrompt(workItemTitle, workItemBody, labels, existingTasks);
+        // Per ADR 0002: resolve the prompt template lazily — the per-Source override wins
+        // if present, otherwise the built-in default. Caller must have eager-loaded the
+        // Source's PromptOverrides collection (TriageKickoffService does).
+        var template = _promptResolver.Resolve(wi.Source, Role.Triage);
+        var prompt = RenderPrompt(template, workItemTitle, workItemBody, labels, existingTasks);
 
         // Snapshot the resolved prompt onto AgentRun.PromptText BEFORE spawning so the audit
         // trail is correct even if the PTY crashes immediately. (ADR 0002.)
@@ -148,7 +155,14 @@ public class ClaudeCliTriageService : ITriageService
             .ToList();
     }
 
+    /// <summary>
+    /// Interpolate a Triage prompt template with the work item's title/body/labels and the
+    /// optional existing-tasks dedupe block. Pure function — takes the resolved template as
+    /// input so callers control whether they got it from <see cref="IPromptResolver"/> (the
+    /// runtime path) or from a literal for tests.
+    /// </summary>
     public static string RenderPrompt(
+        string template,
         string workItemTitle, string workItemBody, string? labels,
         IReadOnlyList<ExistingTask>? existingTasks)
     {
@@ -158,13 +172,23 @@ public class ClaudeCliTriageService : ITriageService
               string.Join("\n", existingTasks.Select((t, i) => $"{i + 1}. {t.Title}\n   {t.Description}")) +
               "\n\nDo NOT propose duplicates or near-duplicates of the existing tasks above. Only suggest new tasks that cover work not already represented.";
 
-        return DefaultPromptTemplate
+        return template
             .Replace("{{TITLE}}", workItemTitle)
             .Replace("{{LABELS}}", labels ?? "(none)")
             .Replace("{{BODY}}", workItemBody)
             .Replace("{{EXISTING_TASKS}}", existingBlock)
             .Replace("{{SUBMIT_TOOL}}", Role.Triage.McpSubmitToolName());
     }
+
+    /// <summary>
+    /// Convenience overload that interpolates the built-in Triage default template. Useful
+    /// for tests that want to assert on the default output without going through the
+    /// resolver.
+    /// </summary>
+    public static string RenderPrompt(
+        string workItemTitle, string workItemBody, string? labels,
+        IReadOnlyList<ExistingTask>? existingTasks)
+        => RenderPrompt(DefaultPromptTemplate, workItemTitle, workItemBody, labels, existingTasks);
 
     // ---------------- Legacy one-shot fallback ----------------
 
