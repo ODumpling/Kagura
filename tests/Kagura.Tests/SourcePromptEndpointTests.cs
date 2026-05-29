@@ -51,7 +51,7 @@ public class SourcePromptEndpointTests : IClassFixture<SourcePromptEndpointTests
         Assert.True(triage.IsOverride);
         Assert.Equal("MY CUSTOM TRIAGE", triage.PromptText);
         // Other roles still show built-in defaults — overriding Triage doesn't leak.
-        Assert.False(rows.Single(r => r.Role == Role.Task).IsOverride);
+        Assert.False(rows!.Single(r => r.Role == Role.Task).IsOverride);
     }
 
     [Fact]

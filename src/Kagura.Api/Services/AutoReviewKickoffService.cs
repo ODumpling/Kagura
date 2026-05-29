@@ -3,6 +3,7 @@ using Kagura.Core.Domain;
 using Kagura.Core.Git;
 using Kagura.Core.Interactive;
 using Kagura.Core.Review;
+using Kagura.Core.Triage;
 using Kagura.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -57,6 +58,11 @@ public sealed class AutoReviewKickoffService : IAutoReviewKickoffService
         var hasQueue = wi.Tasks.Any(t => t.Status == AgentTaskStatus.AwaitingReview);
         if (!hasQueue) return AutoReviewKickoffResult.Invalid("No tasks in AwaitingReview.");
 
+        // The pipeline-level AgentRun is the audit row for the whole auto-review pass —
+        // it owns the runId that AskAsync prompts hang off so the UI can collect user
+        // overrides under one stable id. Per-task PTY Agents get their own AgentRun rows
+        // allocated inside the loop in RunAutoReviewAsync (each with AgentTaskId set so
+        // the sidebar tree can attach them to the right task).
         var run = new AgentRun
         {
             Kind = AgentRunKind.AutoReview,
@@ -76,7 +82,11 @@ public sealed class AutoReviewKickoffService : IAutoReviewKickoffService
     // Fire-and-forget auto-review. Asks the review service for each AwaitingReview task and
     // applies its verdict — auto-merging or flagging with ReviewNotes — before emitting
     // workItemUpdated on completion.
-    private static async Task RunAutoReviewAsync(IServiceScopeFactory scopeFactory, ILogger log, Guid workItemId, Guid runId)
+    //
+    // Per ADR 0001 / issue #70: each per-task review spawns a PTY AutoReview Agent in the
+    // WorkItem's merge worktree. The Agent calls kagura.submit_review when it has made up
+    // its mind; the verdict surfaces back through IReviewService unchanged.
+    private static async Task RunAutoReviewAsync(IServiceScopeFactory scopeFactory, ILogger log, Guid workItemId, Guid pipelineRunId)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<KaguraDbContext>();
@@ -84,13 +94,18 @@ public sealed class AutoReviewKickoffService : IAutoReviewKickoffService
         var reviewer = scope.ServiceProvider.GetRequiredService<IReviewService>();
         var broadcaster = scope.ServiceProvider.GetRequiredService<IAgentBroadcaster>();
         var prompts = scope.ServiceProvider.GetRequiredService<IInteractivePromptService>();
+        var agentContext = scope.ServiceProvider.GetRequiredService<AutoReviewAgentContext>();
+        var promptSnapshot = scope.ServiceProvider.GetRequiredService<IPromptSnapshotSink>();
+        var promptResolver = scope.ServiceProvider.GetRequiredService<IPromptResolver>();
+        var reviewOptions = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ReviewOptions>>().Value;
 
         var wi = await db.WorkItems
             .Include(w => w.Source)
+                .ThenInclude(s => s!.PromptOverrides)
             .Include(w => w.Tasks)
             .FirstOrDefaultAsync(w => w.Id == workItemId);
-        var run = await db.AgentRuns.FirstOrDefaultAsync(r => r.Id == runId);
-        if (wi is null || run is null) return;
+        var pipelineRun = await db.AgentRuns.FirstOrDefaultAsync(r => r.Id == pipelineRunId);
+        if (wi is null || pipelineRun is null) return;
 
         try
         {
@@ -102,16 +117,71 @@ public sealed class AutoReviewKickoffService : IAutoReviewKickoffService
             var repoPath = wi.Source.LocalRepoPath;
             var now = DateTime.UtcNow;
 
+            // Ensure the work-item merge worktree exists; per CONTEXT.md → "Agent working
+            // directory" this is the cwd for AutoReview Agents. The worktree exists on the
+            // WorkItem branch and may or may not have task merges in it yet; either way it
+            // gives the reviewer a real on-disk view of the work-item context.
+            string mergeWorktreePath;
+            try
+            {
+                mergeWorktreePath = await git.EnsureWorkItemMergeWorktreeAsync(repoPath, wi);
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "Auto-review failed to ensure merge worktree for work item {WorkItemId}", workItemId);
+                pipelineRun.Status = AgentRunStatus.Crashed;
+                pipelineRun.EndedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+                await broadcaster.WorkItemUpdatedAsync(workItemId);
+                return;
+            }
+
             foreach (var task in queue)
             {
                 string reasoning;
                 bool autoMerge;
+
+                // Allocate a per-task PTY AgentRun so the sidebar tree can attach the user
+                // to *this* review Agent (not the pipeline-level audit row).
+                var taskRun = new AgentRun
+                {
+                    Kind = AgentRunKind.AutoReview,
+                    WorkItemId = wi.Id,
+                    AgentTaskId = task.Id,
+                    Status = AgentRunStatus.Running,
+                };
+                db.AgentRuns.Add(taskRun);
+                await db.SaveChangesAsync();
+
                 try
                 {
                     var diff = await git.DiffTaskAgainstWorkItemAsync(repoPath, wi, task);
-                    var verdict = await reviewer.ReviewAsync(runId, task.Title, task.Description, diff);
-                    autoMerge = verdict.AutoMerge;
-                    reasoning = verdict.Reasoning;
+
+                    // Resolve the prompt template lazily — per-Source override wins, else
+                    // the built-in default (ADR 0002).
+                    var template = promptResolver.Resolve(wi.Source, Role.AutoReview);
+                    var prompt = ClaudeCliReviewService.RenderPrompt(
+                        template, task.Title, task.Description, diff, reviewOptions.MaxDiffBytes);
+                    await promptSnapshot.SaveAsync(taskRun.Id, prompt, CancellationToken.None);
+
+                    using (agentContext.Push(wi, taskRun.Id, prompt, mergeWorktreePath))
+                    {
+                        var verdict = await reviewer.ReviewAsync(taskRun.Id, task.Title, task.Description, diff);
+                        autoMerge = verdict.AutoMerge;
+                        reasoning = verdict.Reasoning;
+                    }
+                }
+                catch (AgentInterruptedException)
+                {
+                    // User stopped the per-task review Agent. Per CONTEXT.md "Stop vs Cancel"
+                    // the AgentRunner already halted Ralph for this work item; the pipeline
+                    // should bail out without writing further verdicts.
+                    log.LogInformation("Auto-review halted by user-stop for task {TaskId}", task.Id);
+                    pipelineRun.Status = AgentRunStatus.Killed;
+                    pipelineRun.EndedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync();
+                    await broadcaster.WorkItemUpdatedAsync(workItemId);
+                    return;
                 }
                 catch (Exception ex)
                 {
@@ -130,7 +200,7 @@ public sealed class AutoReviewKickoffService : IAutoReviewKickoffService
                     try
                     {
                         choice = await prompts.AskAsync(
-                            runId,
+                            pipelineRunId,
                             $"Reviewer flagged '{task.Title}': {reasoning}. Override and merge anyway?",
                             new[] { "merge", "skip" });
                     }
@@ -170,14 +240,14 @@ public sealed class AutoReviewKickoffService : IAutoReviewKickoffService
             }
 
             wi.UpdatedAt = now;
-            run.Status = AgentRunStatus.Exited;
-            run.EndedAt = DateTime.UtcNow;
+            pipelineRun.Status = AgentRunStatus.Exited;
+            pipelineRun.EndedAt = DateTime.UtcNow;
         }
         catch (Exception ex)
         {
             log.LogError(ex, "Auto-review failed for work item {WorkItemId}", workItemId);
-            run.Status = AgentRunStatus.Crashed;
-            run.EndedAt = DateTime.UtcNow;
+            pipelineRun.Status = AgentRunStatus.Crashed;
+            pipelineRun.EndedAt = DateTime.UtcNow;
         }
 
         await db.SaveChangesAsync();

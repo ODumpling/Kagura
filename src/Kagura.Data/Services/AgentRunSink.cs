@@ -22,6 +22,7 @@ public sealed class AgentRunSink : IAgentRunSink
     {
         var run = await _db.AgentRuns
             .Include(r => r.AgentTask)
+            .Include(r => r.WorkItem)
             .FirstOrDefaultAsync(r => r.Id == runId, ct);
         if (run is null)
         {
@@ -52,6 +53,29 @@ public sealed class AgentRunSink : IAgentRunSink
                 ? $"Killed after exceeding max run duration (exit code {exitCode?.ToString() ?? "null"})"
                 : $"Agent process exited without calling /complete (exit code {exitCode?.ToString() ?? "null"})";
             run.AgentTask.UpdatedAt = DateTime.UtcNow;
+        }
+
+        // Per CONTEXT.md → "Stop vs Cancel" + issue #70 acceptance: a user-initiated Stop on
+        // any orchestrated Agent (Triage / Task / AutoReview / MergeResolver) halts Ralph for
+        // that WorkItem with a clear halt reason. Grill is user-initiated, not orchestrated,
+        // so it's exempt. The user resumes orchestration with the "Retry Ralph Loop" button.
+        if (reason == AgentExitReason.KilledByUser
+            && run.Kind != AgentRunKind.Grill
+            && run.WorkItem is not null
+            && run.WorkItem.RalphLoopActive)
+        {
+            var roleLabel = run.Kind switch
+            {
+                AgentRunKind.Triage => "Triage",
+                AgentRunKind.AutoReview => "AutoReview",
+                AgentRunKind.MergeResolver => "MergeResolver",
+                AgentRunKind.TaskAgent => "Task",
+                _ => run.Kind.ToString(),
+            };
+            run.WorkItem.RalphLoopActive = false;
+            run.WorkItem.RalphLoopHaltReason = $"User stopped {roleLabel} Agent";
+            run.WorkItem.RalphLoopWaitingReason = null;
+            run.WorkItem.UpdatedAt = DateTime.UtcNow;
         }
 
         await _db.SaveChangesAsync(ct);

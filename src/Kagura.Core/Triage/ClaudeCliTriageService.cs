@@ -1,8 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Kagura.Core.Agents;
 using Kagura.Core.Agents.Mcp;
-using Kagura.Core.ClaudeCli;
 using Kagura.Core.Git;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,7 +17,7 @@ public class ClaudeCliTriageService : ITriageService
     /// <summary>
     /// Built-in Triage prompt template. Per ADR 0002 this is the default a Source resolves at
     /// Agent spawn time when it hasn't customised its own Triage prompt; per-Source overrides
-    /// are issue #69 and intentionally out of scope here.
+    /// are resolved through <see cref="IPromptResolver"/>.
     /// Placeholders: <c>{{TITLE}}</c>, <c>{{LABELS}}</c>, <c>{{BODY}}</c>,
     /// <c>{{EXISTING_TASKS}}</c>, <c>{{SUBMIT_TOOL}}</c>.
     /// </summary>
@@ -62,25 +59,6 @@ public class ClaudeCliTriageService : ITriageService
         exit cleanly.
         """;
 
-    // Legacy one-shot SystemPrompt used when no TriageAgentContext is supplied (fallback path).
-    private const string LegacySystemPrompt =
-        """
-        You are a triage assistant for a developer workflow tool. You receive a software issue (title, body, labels)
-        and propose a list of small, independently executable tasks that together complete the issue.
-
-        Rules:
-        - Each task should be small enough to be completed by one autonomous coding agent in a single session.
-        - Prefer 1–5 tasks. Fewer if the issue is small.
-        - Tasks should be as parallelizable as possible. If they MUST run in order, that's fine — set Order accordingly.
-        - Titles are imperative, under 80 characters ("Add ...", "Refactor ...", "Wire ...").
-        - Descriptions are 1-3 sentences explaining scope, files likely involved, and acceptance criteria.
-
-        Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
-        [
-          {"title": "string", "description": "string", "order": integer}
-        ]
-        """;
-
     private readonly TriageOptions _options;
     private readonly TriageAgentContext _context;
     private readonly IAgentRunner _runner;
@@ -112,20 +90,14 @@ public class ClaudeCliTriageService : ITriageService
         IReadOnlyList<ExistingTask>? existingTasks = null,
         CancellationToken ct = default)
     {
-        // Per ADR 0001: when invoked inside the Agent kickoff path, spawn a PTY Triage Agent
-        // and block on its MCP submission. Without a context we fall back to the legacy
-        // one-shot `claude -p` invocation so the strings-only interface still works.
-        if (_context.IsSet)
-            return await ProposeViaAgentAsync(workItemTitle, workItemBody, labels, existingTasks, ct);
+        // Per ADR 0001 / issue #70: Triage runs only as a PTY Agent. Callers must invoke via
+        // TriageKickoffService (which populates the TriageAgentContext); the legacy one-shot
+        // claude -p fallback has been removed.
+        if (!_context.IsSet)
+            throw new InvalidOperationException(
+                "ClaudeCliTriageService requires a TriageAgentContext to be populated. " +
+                "Invoke ProposeTasksAsync through TriageKickoffService rather than calling it directly.");
 
-        return await ProposeViaLegacyCliAsync(workItemTitle, workItemBody, labels, existingTasks, ct);
-    }
-
-    private async Task<IReadOnlyList<TriagedTaskProposal>> ProposeViaAgentAsync(
-        string workItemTitle, string workItemBody, string? labels,
-        IReadOnlyList<ExistingTask>? existingTasks,
-        CancellationToken ct)
-    {
         var wi = _context.WorkItem!;
         var runId = _context.RunId;
 
@@ -189,104 +161,6 @@ public class ClaudeCliTriageService : ITriageService
         string workItemTitle, string workItemBody, string? labels,
         IReadOnlyList<ExistingTask>? existingTasks)
         => RenderPrompt(DefaultPromptTemplate, workItemTitle, workItemBody, labels, existingTasks);
-
-    // ---------------- Legacy one-shot fallback ----------------
-
-    private async Task<IReadOnlyList<TriagedTaskProposal>> ProposeViaLegacyCliAsync(
-        string workItemTitle, string workItemBody, string? labels,
-        IReadOnlyList<ExistingTask>? existingTasks,
-        CancellationToken ct)
-    {
-        var userPrompt = BuildUserPrompt(workItemTitle, workItemBody, labels, existingTasks);
-
-        var args = new List<string>
-        {
-            "-p", userPrompt,
-            "--append-system-prompt", LegacySystemPrompt,
-            "--output-format", "stream-json",
-            "--verbose",
-        };
-        if (!string.IsNullOrWhiteSpace(_options.Model))
-        {
-            args.Add("--model");
-            args.Add(_options.Model);
-        }
-
-        var result = await ClaudeCliPtyRunner.RunAsync(_options.ClaudeBinary, args, ct: ct);
-
-        if (result.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"claude CLI exited with code {result.ExitCode}. stdout: {result.Stdout.Trim()}");
-        }
-
-        var envelopeJson = ClaudeCliPtyRunner.ExtractResultEnvelope(result.Stdout);
-        var envelope = JsonSerializer.Deserialize<ClaudeCliResult>(envelopeJson, JsonOpts)
-            ?? throw new InvalidOperationException($"Could not parse claude CLI JSON envelope. line: {envelopeJson}");
-
-        if (envelope.IsError || string.IsNullOrWhiteSpace(envelope.Result))
-        {
-            throw new InvalidOperationException(
-                $"claude CLI returned error envelope. subtype={envelope.Subtype} result={envelope.Result}");
-        }
-
-        var json = ExtractJsonArray(envelope.Result);
-        var arr = JsonSerializer.Deserialize<List<TriagedTaskProposal>>(json, JsonOpts)
-                  ?? throw new InvalidOperationException("Could not parse triage response as JSON array");
-
-        _log.LogInformation("Triage (legacy path) proposed {Count} tasks", arr.Count);
-        return arr;
-    }
-
-    public static string BuildUserPrompt(
-        string workItemTitle,
-        string workItemBody,
-        string? labels,
-        IReadOnlyList<ExistingTask>? existingTasks)
-    {
-        var basePrompt =
-            $"""
-             Title: {workItemTitle}
-
-             Labels: {labels ?? "(none)"}
-
-             Body:
-             {workItemBody}
-             """;
-
-        if (existingTasks is null || existingTasks.Count == 0)
-            return basePrompt;
-
-        var rendered = string.Join(
-            "\n",
-            existingTasks.Select((t, i) => $"{i + 1}. {t.Title}\n   {t.Description}"));
-
-        return basePrompt +
-            $"""
-
-
-             Existing tasks already proposed or in flight for this work item:
-             {rendered}
-
-             Do NOT propose duplicates or near-duplicates of the existing tasks above. Only suggest new tasks that cover work not already represented.
-             """;
-    }
-
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
-
-    private static string ExtractJsonArray(string text)
-    {
-        var start = text.IndexOf('[');
-        var end = text.LastIndexOf(']');
-        if (start < 0 || end <= start)
-            throw new InvalidOperationException($"Triage response did not contain a JSON array. Got: {text}");
-        return text[start..(end + 1)];
-    }
-
-    private sealed record ClaudeCliResult(
-        [property: JsonPropertyName("result")] string? Result,
-        [property: JsonPropertyName("subtype")] string? Subtype,
-        [property: JsonPropertyName("is_error")] bool IsError);
 }
 
 /// <summary>

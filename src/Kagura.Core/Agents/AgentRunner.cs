@@ -413,6 +413,11 @@ public class AgentRunner : IAgentRunner
         // Non-task kinds linger in the registry so their in-memory ring buffer survives
         // until DismissAsync — the PTY is still killed via DisposeAsync.
         if (!_sessions.TryGetValue(runId, out var session)) return;
+
+        // Pre-claim the exit reason BEFORE OnExit fires so the sink sees KilledByUser. Doing
+        // this *before* Dispose is critical: DisposeAsync fires OnExit (and thus the
+        // fire-and-forget RecordExitAsync) before it returns, and we need the override to be
+        // visible to that task.
         _exitOverrides.TryAdd(runId, AgentExitReason.KilledByUser);
 
         // If an orchestrated Agent was awaiting an MCP submission, surface as interrupted.
@@ -431,6 +436,15 @@ public class AgentRunner : IAgentRunner
         {
             await session.DisposeAsync();
         }
+
+        // Per issue #70 (Stop-halts-Ralph): explicitly drive the sink synchronously after
+        // the PTY is torn down so the WorkItem's RalphLoop state is updated before this
+        // method returns. The DisposeAsync path also kicks off a fire-and-forget
+        // RecordExitAsync via OnExit, but that runs on a background continuation and may
+        // not finish before the calling endpoint writes its own row updates — leaving a
+        // window where the sink sees an already-Killed run and skips the halt. Running it
+        // inline here guarantees the halt is visible the moment Stop returns to the caller.
+        await RecordExitAsync(runId, session.ExitCode);
     }
 
     public async Task DismissAsync(Guid runId)

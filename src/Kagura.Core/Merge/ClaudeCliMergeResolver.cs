@@ -1,7 +1,3 @@
-using System.Diagnostics;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Kagura.Core.Agents;
 using Kagura.Core.Agents.Mcp;
 using Microsoft.Extensions.Logging;
@@ -20,7 +16,7 @@ public class ClaudeCliMergeResolver : IMergeConflictResolver
     /// <summary>
     /// Built-in MergeResolver prompt template. Per ADR 0002 this is the default a Source
     /// resolves at Agent spawn time when it hasn't customised its own MergeResolver prompt;
-    /// per-Source overrides are tracked separately and intentionally out of scope here.
+    /// per-Source overrides are resolved through <see cref="IPromptResolver"/>.
     /// Placeholders: <c>{{TASK_TITLE}}</c>, <c>{{SUBMIT_TOOL}}</c>.
     /// </summary>
     public const string DefaultPromptTemplate =
@@ -60,31 +56,6 @@ public class ClaudeCliMergeResolver : IMergeConflictResolver
         cleanly.
         """;
 
-    // Legacy one-shot SystemPrompt used when no MergeResolverAgentContext is supplied
-    // (e.g. tests with a stub resolver, or callers that never set up an AgentRun).
-    private const string LegacySystemPrompt =
-        """
-        You are a git merge-conflict resolver. The working directory is a git worktree
-        in the middle of a `git merge` that hit conflicts. Your only job is to resolve
-        those conflicts and finalize the merge.
-
-        Rules:
-        - Use `git status` and `git diff` to understand the conflicts.
-        - For each conflicted file, choose the resolution that preserves both branches'
-          intent. Prefer combining when both sides contribute meaningful changes.
-        - Do NOT touch files that are not currently conflicted.
-        - Do NOT run `git merge --abort` or otherwise discard the in-progress merge.
-        - When all files are resolved: `git add -A` then `git commit --no-edit` to finalize.
-        - If you cannot resolve safely (semantic conflict, opposing edits, unclear intent),
-          STOP. Do not commit. Do not abort. Leave the merge in-progress for a human.
-
-        Reply with ONLY a JSON object as your final output, no prose, no markdown fences:
-        {"success": true|false, "notes": "1-3 sentences describing what you did or why you gave up"}
-        """;
-
-    private const string SystemPrompt = DefaultPromptTemplate;
-
-    private readonly MergeResolverOptions _options;
     private readonly MergeResolverAgentContext _context;
     private readonly Lazy<IAgentRunner> _runner;
     private readonly ILogger<ClaudeCliMergeResolver> _log;
@@ -102,7 +73,7 @@ public class ClaudeCliMergeResolver : IMergeConflictResolver
         Lazy<IAgentRunner> runner,
         ILogger<ClaudeCliMergeResolver> log)
     {
-        _options = options.Value;
+        _ = options; // retained for symmetry with the other Role services / future use
         _context = context;
         _runner = runner;
         _log = log;
@@ -111,21 +82,16 @@ public class ClaudeCliMergeResolver : IMergeConflictResolver
     public async Task<MergeResolutionResult> ResolveAsync(
         string worktreePath, string taskTitle, CancellationToken ct = default)
     {
-        // Per ADR 0001: when invoked inside the Agent kickoff path (GitService.MergeTaskBranchAsync
-        // populates the context immediately before calling), spawn a PTY MergeResolver Agent
-        // in the WorkItem's merge worktree and block on its MCP submission. Without a context
-        // we fall back to the legacy one-shot `claude -p` invocation so the strings-only
-        // IMergeConflictResolver interface remains usable from places that don't yet
-        // populate the ambient.
-        if (_context.IsSet)
-            return await ResolveViaAgentAsync(worktreePath, taskTitle, ct);
+        // Per ADR 0001 / issue #70: MergeResolver runs only as a PTY Agent. The legacy
+        // claude -p fallback has been removed; callers must invoke through the kickoff
+        // path that populates MergeResolverAgentContext (GitService.MergeTaskBranchAsync
+        // does this via IMergeResolverKickoff).
+        if (!_context.IsSet)
+            throw new InvalidOperationException(
+                "ClaudeCliMergeResolver requires a MergeResolverAgentContext to be populated. " +
+                "Invoke ResolveAsync through GitService.MergeTaskBranchAsync (which wires the " +
+                "IMergeResolverKickoff that pushes the context) rather than calling it directly.");
 
-        return await ResolveViaLegacyCliAsync(worktreePath, taskTitle, ct);
-    }
-
-    private async Task<MergeResolutionResult> ResolveViaAgentAsync(
-        string worktreePath, string taskTitle, CancellationToken ct)
-    {
         var wi = _context.WorkItem!;
         var runId = _context.RunId;
 
@@ -175,109 +141,4 @@ public class ClaudeCliMergeResolver : IMergeConflictResolver
         DefaultPromptTemplate
             .Replace("{{TASK_TITLE}}", taskTitle)
             .Replace("{{SUBMIT_TOOL}}", Role.MergeResolver.McpSubmitToolName());
-
-    // ---------------- Legacy one-shot fallback ----------------
-
-    private async Task<MergeResolutionResult> ResolveViaLegacyCliAsync(
-        string worktreePath, string taskTitle, CancellationToken ct)
-    {
-        var userPrompt =
-            $"""
-             Task: {taskTitle}
-
-             A `git merge` of this task's branch into the work-item branch hit conflicts.
-             Resolve them and finalize the merge as instructed in the system prompt.
-             """;
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = _options.ClaudeBinary,
-            WorkingDirectory = worktreePath,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        psi.ArgumentList.Add("-p");
-        psi.ArgumentList.Add(userPrompt);
-        psi.ArgumentList.Add("--append-system-prompt");
-        psi.ArgumentList.Add(LegacySystemPrompt);
-        psi.ArgumentList.Add("--output-format");
-        psi.ArgumentList.Add("json");
-        psi.ArgumentList.Add("--permission-mode");
-        psi.ArgumentList.Add("acceptEdits");
-        psi.ArgumentList.Add("--allowedTools");
-        psi.ArgumentList.Add("Bash,Read,Edit,Write,Glob,Grep");
-        if (!string.IsNullOrWhiteSpace(_options.Model))
-        {
-            psi.ArgumentList.Add("--model");
-            psi.ArgumentList.Add(_options.Model);
-        }
-
-        using var process = new Process { StartInfo = psi };
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        await using var _ = ct.Register(() =>
-        {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-        });
-
-        await process.WaitForExitAsync(ct);
-
-        if (process.ExitCode != 0)
-        {
-            _log.LogWarning("claude CLI exited {Exit} during merge resolution. stderr: {Stderr}",
-                process.ExitCode, stderr.ToString().Trim());
-            return new MergeResolutionResult(false, $"Resolver process exited with code {process.ExitCode}");
-        }
-
-        ClaudeCliResult? envelope;
-        try
-        {
-            envelope = JsonSerializer.Deserialize<ClaudeCliResult>(stdout.ToString(), JsonOpts);
-        }
-        catch (Exception ex)
-        {
-            return new MergeResolutionResult(false, $"Could not parse resolver JSON envelope: {ex.Message}");
-        }
-        if (envelope is null || envelope.IsError || string.IsNullOrWhiteSpace(envelope.Result))
-            return new MergeResolutionResult(false, $"Resolver returned error envelope (subtype={envelope?.Subtype})");
-
-        try
-        {
-            var json = ExtractJsonObject(envelope.Result);
-            var verdict = JsonSerializer.Deserialize<MergeResolutionResult>(json, JsonOpts)
-                ?? throw new InvalidOperationException("Could not parse resolver verdict JSON");
-            _log.LogInformation("Merge resolver verdict (legacy path) for '{Title}': success={Success}", taskTitle, verdict.Success);
-            return verdict;
-        }
-        catch (Exception ex)
-        {
-            return new MergeResolutionResult(false, $"Resolver produced no valid verdict: {ex.Message}");
-        }
-    }
-
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
-
-    private static string ExtractJsonObject(string text)
-    {
-        var start = text.IndexOf('{');
-        var end = text.LastIndexOf('}');
-        if (start < 0 || end <= start)
-            throw new InvalidOperationException($"Resolver response did not contain a JSON object. Got: {text}");
-        return text[start..(end + 1)];
-    }
-
-    private sealed record ClaudeCliResult(
-        [property: JsonPropertyName("result")] string? Result,
-        [property: JsonPropertyName("subtype")] string? Subtype,
-        [property: JsonPropertyName("is_error")] bool IsError);
 }

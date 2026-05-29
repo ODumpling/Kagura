@@ -21,11 +21,9 @@ public class GrillOptions
 public class ClaudeCliGrillService : IGrillService
 {
     /// <summary>
-    /// Built-in Grill prompt. Surfaced as the lazy default in
-    /// <see cref="Kagura.Core.Agents.RolePromptDefaults"/> so the Source's "Prompts" tab can
-    /// render it even though Grill hasn't been migrated to the PTY-Agent path yet
-    /// (that's #66's job). When Grill is migrated this constant becomes the template
-    /// resolved by <c>PromptResolver</c> at Agent spawn time.
+    /// Built-in Grill prompt. Used both for conversational <see cref="RespondAsync"/> turns
+    /// (the legacy claude -p path, intentionally retained for per-turn chat replies) and as
+    /// the prompt-template default surfaced through <see cref="IPromptResolver"/>.
     /// </summary>
     // Adapted from the grill-me skill: interview one question at a time, each with a
     // "My take:" recommendation, until the issue is fleshed out enough to act on.
@@ -57,29 +55,6 @@ public class ClaudeCliGrillService : IGrillService
 
         Output: write only your next message to the user as plain markdown. No JSON, no preamble,
         no role labels.
-        """;
-
-    private const string LegacySynthesizeSystemPrompt =
-        """
-        You are rewriting a software work item description from scratch, using the grilling
-        transcript between a user and an interviewer to produce a complete, actionable write-up.
-
-        The write-up should replace the original imported issue body. Include, where the
-        transcript supports it:
-        - Goal and success criteria
-        - Scope (in / out)
-        - Key assumptions
-        - Constraints
-        - Alternatives considered and why rejected
-        - Risks and failure modes
-        - Stakeholders / decision-makers (if relevant)
-        - Trade-offs
-        - Rollback / reversibility
-        - Concrete next step
-
-        Output ONLY the markdown body for the work item. No preamble like "Here's the write-up",
-        no JSON, no fenced markdown wrapper. Use `##` for section headings. Be precise and
-        terse — every sentence should carry weight.
         """;
 
     /// <summary>
@@ -169,8 +144,8 @@ public class ClaudeCliGrillService : IGrillService
     {
         // Per-turn interview replies are not a typed-result submission — they are
         // conversational text that the chat UI appends as the next assistant comment.
-        // RespondAsync therefore stays on the legacy one-shot path; the Agent migration
-        // covers the terminal SynthesizeAsync step that produces the refined body.
+        // RespondAsync therefore stays on the legacy one-shot path; only the terminal
+        // SynthesizeAsync step is a PTY Agent that delivers via MCP.
         var userPrompt =
             $"""
              # Work item
@@ -199,22 +174,14 @@ public class ClaudeCliGrillService : IGrillService
         IReadOnlyList<GrillTurn> history,
         CancellationToken ct = default)
     {
-        // Per ADR 0001: when invoked inside the Agent kickoff path, spawn a PTY Grill Agent
-        // and block on its MCP submission. Without a context we fall back to the legacy
-        // one-shot `claude -p` invocation so the strings-only interface still works.
-        if (_context.IsSet)
-            return await SynthesizeViaAgentAsync(workItemTitle, originalBody, labels, history, ct);
+        // Per ADR 0001 / issue #70: SynthesizeAsync runs only as a PTY Agent. Callers must
+        // invoke through the kickoff path that populates GrillAgentContext; the legacy
+        // claude -p submission fallback has been removed.
+        if (!_context.IsSet)
+            throw new InvalidOperationException(
+                "ClaudeCliGrillService.SynthesizeAsync requires a GrillAgentContext to be populated. " +
+                "Invoke synthesis through the Grill kickoff endpoint rather than calling it directly.");
 
-        return await SynthesizeViaLegacyCliAsync(workItemTitle, originalBody, labels, history, ct);
-    }
-
-    private async Task<string> SynthesizeViaAgentAsync(
-        string workItemTitle,
-        string originalBody,
-        string? labels,
-        IReadOnlyList<GrillTurn> history,
-        CancellationToken ct)
-    {
         var wi = _context.WorkItem!;
         var runId = _context.RunId;
 
@@ -257,35 +224,11 @@ public class ClaudeCliGrillService : IGrillService
             .Replace("{{SUBMIT_TOOL}}", Role.Grill.McpSubmitToolName());
     }
 
-    // ---------------- Legacy one-shot fallback ----------------
-
-    private Task<string> SynthesizeViaLegacyCliAsync(
-        string workItemTitle,
-        string originalBody,
-        string? labels,
-        IReadOnlyList<GrillTurn> history,
-        CancellationToken ct)
-    {
-        var userPrompt =
-            $"""
-             # Work item
-             Title: {workItemTitle}
-
-             Labels: {labels ?? "(none)"}
-
-             Original body:
-             {(string.IsNullOrWhiteSpace(originalBody) ? "(empty)" : originalBody)}
-
-             # Grilling transcript
-             {FormatHistory(history)}
-
-             # Your turn
-             Produce the rewritten work item description in markdown.
-             """;
-
-        return InvokeClaudeAsync(LegacySynthesizeSystemPrompt, userPrompt, ct);
-    }
-
+    /// <summary>
+    /// One-shot claude -p invocation, retained for the conversational <see cref="RespondAsync"/>
+    /// path. Per-turn interview replies aren't a typed-result submission, so they don't fit
+    /// the PTY-Agent + MCP submission model — they're plain markdown text the chat UI appends.
+    /// </summary>
     private async Task<string> InvokeClaudeAsync(string systemPrompt, string userPrompt, CancellationToken ct)
     {
         var psi = new ProcessStartInfo

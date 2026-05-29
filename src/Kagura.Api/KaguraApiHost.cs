@@ -108,6 +108,10 @@ public static class KaguraApiHost
             opt.ClaudeBinary = devflow["ClaudeBinary"] ?? "claude";
             opt.Model = builder.Configuration["Review:Model"];
         });
+        // AutoReviewAgentContext is singleton (like MergeResolverAgentContext) because it
+        // uses AsyncLocal under the hood — scoped wouldn't be visible to the per-task
+        // ReviewAsync invocations spun off in the kickoff's background loop.
+        builder.Services.AddSingleton<AutoReviewAgentContext>();
         builder.Services.AddScoped<IReviewService, ClaudeCliReviewService>();
         builder.Services.AddScoped<IAutoReviewKickoffService, AutoReviewKickoffService>();
         builder.Services.AddSingleton<IReviewPromptCoordinator, InMemoryReviewPromptCoordinator>();

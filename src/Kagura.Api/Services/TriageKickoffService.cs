@@ -124,6 +124,15 @@ public sealed class TriageKickoffService : ITriageKickoffService
             run.Status = AgentRunStatus.Exited;
             run.EndedAt = DateTime.UtcNow;
         }
+        catch (Kagura.Core.Agents.AgentInterruptedException)
+        {
+            // Per CONTEXT.md "Stop vs Cancel" + issue #70: user-stop on an orchestrated
+            // Triage Agent halts Ralph. AgentRunSink has already marked the run Killed and
+            // populated RalphLoopHaltReason via the KilledByUser path; we deliberately do
+            // NOT set LastTriageError here, so the "Retry Ralph Loop" resume button can
+            // re-spawn cleanly without first having to manually clear an error banner.
+            log.LogInformation("Triage Agent for work item {WorkItemId} stopped by user", workItemId);
+        }
         catch (Exception ex)
         {
             log.LogError(ex, "Triage failed for work item {WorkItemId}", workItemId);

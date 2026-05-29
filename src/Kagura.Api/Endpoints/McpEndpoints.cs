@@ -85,6 +85,12 @@ public static class McpEndpoints
                         },
                         new
                         {
+                            name = Role.AutoReview.McpSubmitToolName(),
+                            description = "Submit the AutoReview verdict for this task's diff. Set `autoMerge` true if the diff is safe to merge automatically; false if it needs human review. Calling this tool ends the AutoReview agent.",
+                            inputSchema = ReviewInputSchema,
+                        },
+                        new
+                        {
                             name = Role.MergeResolver.McpSubmitToolName(),
                             description = "Submit the outcome of an attempted merge-conflict resolution. Set `resolved` true only after `git add`/`git commit` finalized the merge; otherwise set it false and leave the worktree mid-merge. Calling this tool ends the MergeResolver agent.",
                             inputSchema = MergeResolutionInputSchema,
@@ -142,6 +148,29 @@ public static class McpEndpoints
         additionalProperties = false,
     };
 
+    // JSON Schema for kagura.submit_review's input. Mirrors ReviewSubmission — the same
+    // shape as the existing ReviewVerdict so the typed-result contract seen by Ralph Loop
+    // is unchanged across the legacy → PTY migration.
+    private static readonly object ReviewInputSchema = new
+    {
+        type = "object",
+        properties = new
+        {
+            autoMerge = new
+            {
+                type = "boolean",
+                description = "True if the diff is safe to merge automatically; false if it needs a human reviewer to look at it before merging.",
+            },
+            reasoning = new
+            {
+                type = "string",
+                description = "Short (1-3 sentences) explanation of the decision.",
+            },
+        },
+        required = new[] { "autoMerge", "reasoning" },
+        additionalProperties = false,
+    };
+
     // JSON Schema for kagura.submit_merge_resolution's input. Mirrors MergeResolutionSubmission.
     private static readonly object MergeResolutionInputSchema = new
     {
@@ -175,6 +204,7 @@ public static class McpEndpoints
 
         if (name != Role.Triage.McpSubmitToolName() &&
             name != Role.Grill.McpSubmitToolName() &&
+            name != Role.AutoReview.McpSubmitToolName() &&
             name != Role.MergeResolver.McpSubmitToolName())
             return ToolError(id, $"Unknown tool '{name}'.");
 
