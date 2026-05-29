@@ -61,6 +61,10 @@ public record AgentTaskDto(
 
 public record UpdateIncludeInPullRequestDto(bool IncludeInPullRequest);
 
+public record RalphLoopActivationDto(bool AutoApproveTriage, bool AutoReviewEnabled);
+
+public record RalphConfigUpdateDto(bool? AutoApproveTriage, bool? AutoReviewEnabled);
+
 public record FinishWorkItemResultDto(
     Guid Id,
     WorkItemStatus Status,
@@ -343,9 +347,43 @@ public static class WorkItemEndpoints
             return Results.Accepted(value: new { runId = run.Id });
         });
 
-        // Start (or re-start after halt) the Ralph Loop on this work item.
-        // Resets any Failed tasks to Approved with fresh retry budget, then flips the flag.
+        // First activation. 409 if already Active; 400 if Grill is active or the work item is in a terminal state.
+        // Does not touch HaltReason / WaitingReason / LastTriageError — use /resume for that.
         grp.MapPost("/{id:guid}/ralph-loop", async (
+            Guid id,
+            RalphLoopActivationDto body,
+            KaguraDbContext db,
+            IAgentBroadcaster broadcaster,
+            CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems.FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (wi is null) return Results.NotFound();
+
+            if (wi.RalphLoopActive)
+                return Results.Conflict(new { error = "Ralph Loop is already active." });
+
+            if (wi.GrillStatus == GrillStatus.Active)
+                return Results.BadRequest(new { error = "Grill is active on this work item." });
+
+            if (wi.Status is WorkItemStatus.PullRequested
+                or WorkItemStatus.Cancelled
+                or WorkItemStatus.Closed
+                or WorkItemStatus.Done)
+                return Results.BadRequest(new { error = $"Work item is {wi.Status}; nothing for Ralph to do." });
+
+            wi.RalphLoopActive = true;
+            wi.AutoApproveTriage = body.AutoApproveTriage;
+            wi.AutoReviewEnabled = body.AutoReviewEnabled;
+            wi.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await broadcaster.WorkItemUpdatedAsync(wi.Id);
+
+            return Results.Accepted();
+        });
+
+        // Resume after halt. 409 if not halted. Clears HaltReason / WaitingReason / LastTriageError and
+        // resets Failed tasks to Approved with RetryAttempts = 0 regardless of why Ralph halted.
+        grp.MapPost("/{id:guid}/ralph-loop/resume", async (
             Guid id,
             KaguraDbContext db,
             IAgentBroadcaster broadcaster,
@@ -356,14 +394,9 @@ public static class WorkItemEndpoints
                 .FirstOrDefaultAsync(w => w.Id == id, ct);
             if (wi is null) return Results.NotFound();
 
-            if (wi.Status is WorkItemStatus.Closed or WorkItemStatus.PullRequested)
-                return Results.BadRequest(new { error = $"Work item is {wi.Status}; nothing for Ralph to do." });
-
-            if (wi.Tasks.Count == 0)
-                return Results.BadRequest(new { error = "No tasks on this work item." });
-
-            if (wi.Tasks.All(t => t.Status == AgentTaskStatus.Merged))
-                return Results.BadRequest(new { error = "All tasks already merged." });
+            var halted = !wi.RalphLoopActive && wi.RalphLoopHaltReason is not null;
+            if (!halted)
+                return Results.Conflict(new { error = "Ralph Loop is not halted." });
 
             var now = DateTime.UtcNow;
             foreach (var t in wi.Tasks.Where(t => t.Status == AgentTaskStatus.Failed))
@@ -376,6 +409,8 @@ public static class WorkItemEndpoints
 
             wi.RalphLoopActive = true;
             wi.RalphLoopHaltReason = null;
+            wi.RalphLoopWaitingReason = null;
+            wi.LastTriageError = null;
             wi.UpdatedAt = now;
             await db.SaveChangesAsync(ct);
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
@@ -383,8 +418,8 @@ public static class WorkItemEndpoints
             return Results.Accepted();
         });
 
-        // Cancel the loop. Does not kill in-flight agents — they finish their current attempt;
-        // the loop just stops advancing further stages.
+        // Cancel the loop. Does not kill in-flight AgentRuns — they finish naturally; the loop just
+        // stops advancing. Per-run cancel UI handles killing individual runs.
         grp.MapPost("/{id:guid}/ralph-loop/cancel", async (
             Guid id,
             KaguraDbContext db,
@@ -398,9 +433,43 @@ public static class WorkItemEndpoints
 
             wi.RalphLoopActive = false;
             wi.RalphLoopHaltReason = "Cancelled by user.";
+            wi.RalphLoopWaitingReason = null;
             wi.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             await broadcaster.WorkItemUpdatedAsync(wi.Id);
+
+            return Results.NoContent();
+        });
+
+        // Mutate AutoApproveTriage / AutoReviewEnabled at any point. Either field omitted (null) is left unchanged.
+        grp.MapMethods("/{id:guid}/ralph-config", new[] { "PATCH" }, async (
+            Guid id,
+            RalphConfigUpdateDto body,
+            KaguraDbContext db,
+            IAgentBroadcaster broadcaster,
+            CancellationToken ct) =>
+        {
+            var wi = await db.WorkItems.FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (wi is null) return Results.NotFound();
+
+            var changed = false;
+            if (body.AutoApproveTriage is { } autoApprove && wi.AutoApproveTriage != autoApprove)
+            {
+                wi.AutoApproveTriage = autoApprove;
+                changed = true;
+            }
+            if (body.AutoReviewEnabled is { } autoReview && wi.AutoReviewEnabled != autoReview)
+            {
+                wi.AutoReviewEnabled = autoReview;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                wi.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                await broadcaster.WorkItemUpdatedAsync(wi.Id);
+            }
 
             return Results.NoContent();
         });
