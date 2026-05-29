@@ -66,10 +66,14 @@ export const api = {
       http<FinishWorkItemResult>('POST', `/api/workitems/${id}/finish`),
     autoReview: (id: string) =>
       http<AutoReviewResult>('POST', `/api/workitems/${id}/auto-review`),
-    ralphLoopStart: (id: string) =>
-      http<void>('POST', `/api/workitems/${id}/ralph-loop`),
+    ralphLoopStart: (id: string, body: { autoApproveTriage: boolean; autoReviewEnabled: boolean }) =>
+      http<void>('POST', `/api/workitems/${id}/ralph-loop`, body),
+    ralphLoopResume: (id: string) =>
+      http<void>('POST', `/api/workitems/${id}/ralph-loop/resume`),
     ralphLoopCancel: (id: string) =>
       http<void>('POST', `/api/workitems/${id}/ralph-loop/cancel`),
+    ralphConfig: (id: string, body: { autoApproveTriage?: boolean; autoReviewEnabled?: boolean }) =>
+      http<void>('PATCH', `/api/workitems/${id}/ralph-config`, body),
   },
 
   grill: {
