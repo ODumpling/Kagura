@@ -157,6 +157,8 @@ public static class KaguraApiHost
             MaxRetryAttempts = devflow.GetValue<int?>("RalphLoop:MaxRetryAttempts") ?? 3,
             MaxConcurrentTasksPerWorkItem = devflow.GetValue<int?>("RalphLoop:MaxConcurrentTasksPerWorkItem") ?? 3,
         });
+        builder.Services.AddScoped<ITriageKickoffService, TriageKickoffService>();
+        builder.Services.AddScoped<IAutoReviewKickoffService, AutoReviewKickoffService>();
         builder.Services.AddScoped<RalphLoopDriver>();
         builder.Services.AddHostedService<RalphLoopService>();
 
