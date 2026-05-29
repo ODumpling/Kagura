@@ -7,6 +7,8 @@ interface SourcesContextValue {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  syncVersion: number;
+  markSynced: () => void;
 }
 
 const SourcesContext = createContext<SourcesContextValue | null>(null);
@@ -15,6 +17,7 @@ export function SourcesProvider({ children }: { children: ReactNode }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncVersion, setSyncVersion] = useState(0);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -28,10 +31,12 @@ export function SourcesProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const markSynced = useCallback(() => setSyncVersion(v => v + 1), []);
+
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
-    <SourcesContext.Provider value={{ sources, loading, error, refresh }}>
+    <SourcesContext.Provider value={{ sources, loading, error, refresh, syncVersion, markSynced }}>
       {children}
     </SourcesContext.Provider>
   );

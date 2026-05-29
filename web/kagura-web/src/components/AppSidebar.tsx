@@ -19,7 +19,7 @@ const sourceIcons: Record<SourceType, typeof FileText> = {
 };
 
 export function AppSidebar() {
-  const { sources, refresh } = useSources();
+  const { sources, refresh, markSynced } = useSources();
   const { active } = useAgentSessions();
   const location = useLocation();
   const [syncing, setSyncing] = useState(false);
@@ -28,7 +28,7 @@ export function AppSidebar() {
 
   async function syncAll() {
     setSyncing(true);
-    try { await api.sources.syncAll(); await refresh(); }
+    try { await api.sources.syncAll(); await refresh(); markSynced(); }
     finally { setSyncing(false); }
   }
 
