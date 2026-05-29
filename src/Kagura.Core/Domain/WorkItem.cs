@@ -37,6 +37,9 @@ public class WorkItem
 
     public bool RalphLoopActive { get; set; }
     public string? RalphLoopHaltReason { get; set; }
+    public string? RalphLoopWaitingReason { get; set; }
+    public bool AutoApproveTriage { get; set; }
+    public bool AutoReviewEnabled { get; set; } = true;
 
     public string? LastTriageError { get; set; }
 
