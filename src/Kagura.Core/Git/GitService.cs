@@ -260,7 +260,13 @@ public partial class GitService
     public Task RemoveWorkItemMergeWorktreeAsync(string repoPath, WorkItem wi, CancellationToken ct = default) =>
         RemoveWorktreeAsync(repoPath, WorkItemMergeWorktreePath(wi), ct);
 
-    private async Task<string> EnsureWorkItemMergeWorktreeAsync(string repoPath, WorkItem wi, CancellationToken ct)
+    /// <summary>
+    /// Ensure the WorkItem's merge worktree exists at <see cref="WorkItemMergeWorktreePath"/>,
+    /// checked out on the WorkItem's branch. Used both by <see cref="MergeTaskBranchAsync"/>
+    /// when a real merge is about to run, and by AutoReview (per CONTEXT.md → "Agent working
+    /// directory") so the reviewer Agent has the work-item context on disk.
+    /// </summary>
+    public async Task<string> EnsureWorkItemMergeWorktreeAsync(string repoPath, WorkItem wi, CancellationToken ct = default)
     {
         var branch = await EnsureWorkItemBranchAsync(repoPath, wi, ct);
         var path = WorkItemMergeWorktreePath(wi);
