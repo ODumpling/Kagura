@@ -23,7 +23,7 @@ export function AgentTerminalDialog({ run, busy, onClose, onStop }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-none w-[75vw] h-[75vh] flex flex-col">
+      <DialogContent className="sm:max-w-none w-[95vw] h-[95vh] max-w-[95vw] max-h-[95vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle>
             {run ? `${AgentRunKindLabel[run.kind]} — ${run.title || run.runId.slice(0, 8)}` : 'Agent terminal'}
