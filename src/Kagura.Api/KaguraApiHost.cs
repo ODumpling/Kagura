@@ -100,6 +100,7 @@ public static class KaguraApiHost
         builder.Services.AddScoped<ITriageService, ClaudeCliTriageService>();
         builder.Services.AddScoped<TriageAgentContext>();
         builder.Services.AddScoped<IPromptSnapshotSink, DbPromptSnapshotSink>();
+        builder.Services.AddSingleton<IPromptResolver, PromptResolver>();
         builder.Services.AddScoped<ITriageKickoffService, TriageKickoffService>();
 
         builder.Services.Configure<ReviewOptions>(opt =>
@@ -205,6 +206,7 @@ public static class KaguraApiHost
         app.UseCors();
         app.MapDefaultEndpoints();
         app.MapSourceEndpoints();
+        app.MapSourcePromptEndpoints();
         app.MapWorkItemEndpoints();
         app.MapTriageEndpoints();
         app.MapGrillEndpoints();

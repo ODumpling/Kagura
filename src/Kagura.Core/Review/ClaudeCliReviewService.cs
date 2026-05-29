@@ -15,7 +15,14 @@ public class ReviewOptions
 
 public class ClaudeCliReviewService : IReviewService
 {
-    private const string SystemPrompt =
+    /// <summary>
+    /// Built-in AutoReview prompt. Surfaced as the lazy default in
+    /// <see cref="Kagura.Core.Agents.RolePromptDefaults"/> so the Source's "Prompts" tab can
+    /// render it even though AutoReview hasn't been migrated to the PTY-Agent path yet
+    /// (that's #67's job). When AutoReview is migrated this constant becomes the template
+    /// resolved by <c>PromptResolver</c> at Agent spawn time.
+    /// </summary>
+    public const string DefaultPromptTemplate =
         """
         You are an automated code reviewer for a developer workflow tool. You receive a task
         description and a git diff of an autonomous agent's changes. Decide whether the diff
@@ -36,6 +43,8 @@ public class ClaudeCliReviewService : IReviewService
         Respond with ONLY a JSON object, no prose, no markdown fences:
         {"autoMerge": true|false, "reasoning": "1-3 sentences explaining the decision"}
         """;
+
+    private const string SystemPrompt = DefaultPromptTemplate;
 
     private readonly ReviewOptions _options;
     private readonly ILogger<ClaudeCliReviewService> _log;

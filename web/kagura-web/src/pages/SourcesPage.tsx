@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { FileText, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { api } from '@/api';
-import { type UpsertSource, SourceType, SourceTypeLabel } from '@/types';
+import { type Source, type UpsertSource, SourceType, SourceTypeLabel } from '@/types';
 import { useSources } from '@/contexts/SourcesContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { SourcePromptsDialog } from '@/components/SourcePromptsDialog';
 
 const blankSource = (): UpsertSource => ({
   name: '',
@@ -130,6 +131,7 @@ export function SourcesPage() {
   const { sources, refresh, markSynced } = useSources();
   const [searchParams, setSearchParams] = useSearchParams();
   const [editing, setEditing] = useState<{ id?: string; draft: UpsertSource } | null>(null);
+  const [promptsFor, setPromptsFor] = useState<Source | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -211,6 +213,9 @@ export function SourcesPage() {
                   <TableCell className="text-right space-x-2 whitespace-nowrap">
                     <Button variant="outline" size="sm" onClick={() => syncOne(s.id)} disabled={busy === s.id}>
                       <RefreshCw className={busy === s.id ? 'animate-spin' : ''} /> Sync
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setPromptsFor(s)}>
+                      <FileText /> Prompts
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => setEditing({
                       id: s.id,
@@ -325,6 +330,12 @@ export function SourcesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SourcePromptsDialog
+        source={promptsFor}
+        open={!!promptsFor}
+        onOpenChange={(open) => !open && setPromptsFor(null)}
+      />
     </div>
   );
 }

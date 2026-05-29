@@ -230,6 +230,39 @@ export const AgentRunKindLabel: Record<AgentRunKind, string> = {
   [AgentRunKind.MergeResolver]: 'Merge',
 };
 
+// Mirrors Kagura.Core.Agents.Role. Used by the Source "Prompts" tab to surface one
+// textarea per Role (issue #69 / ADR 0002).
+export enum Role {
+  Triage = 0,
+  Task = 1,
+  AutoReview = 2,
+  Grill = 3,
+  MergeResolver = 4,
+}
+
+export const RoleLabel: Record<Role, string> = {
+  [Role.Triage]: 'Triage',
+  [Role.Task]: 'Task',
+  [Role.AutoReview]: 'Auto-Review',
+  [Role.Grill]: 'Grill',
+  [Role.MergeResolver]: 'Merge Resolver',
+};
+
+export const RoleDescription: Record<Role, string> = {
+  [Role.Triage]: 'Proposes tasks from an imported work item.',
+  [Role.Task]: 'Implements a single approved task in its own worktree.',
+  [Role.AutoReview]: 'Reviews a task diff and decides whether to auto-merge.',
+  [Role.Grill]: 'Interviews you to flesh out a thin work item description.',
+  [Role.MergeResolver]: 'Resolves conflicts when merging a task branch back.',
+};
+
+export interface RolePrompt {
+  role: Role;
+  promptText: string;
+  isOverride: boolean;
+  updatedAt: string | null;
+}
+
 export interface FinishWorkItemResult {
   id: string;
   status: WorkItemStatus;

@@ -81,6 +81,7 @@ public sealed class TriageKickoffService : ITriageKickoffService
         var wi = await db.WorkItems
             .Include(w => w.Tasks)
             .Include(w => w.Source)
+                .ThenInclude(s => s!.PromptOverrides)
             .FirstOrDefaultAsync(w => w.Id == workItemId);
         var run = await db.AgentRuns.FirstOrDefaultAsync(r => r.Id == runId);
         if (wi is null || run is null) return;
