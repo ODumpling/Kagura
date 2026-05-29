@@ -10,17 +10,22 @@ public enum MergeOutcome { AlreadyMerged, Merged, MergedByAgent }
 public record MergeResult(MergeOutcome Outcome, string? Notes = null);
 
 /// <summary>
-/// Hook invoked by <see cref="GitService.MergeTaskBranchAsync"/> immediately before the
-/// <see cref="IMergeConflictResolver"/> is called on a conflicted merge. The
+/// Hook invoked by <see cref="GitService.MergeTaskBranchAsync"/> to drive the
+/// <see cref="IMergeConflictResolver"/> on a conflicted merge. The
 /// <see cref="Kagura.Api"/> implementation creates an AgentRun row, populates the
-/// ambient <see cref="MergeResolverAgentContext"/>, and returns an <see cref="IDisposable"/>
-/// that clears the ambient on dispose so a later merge invocation on the same async
-/// flow doesn't accidentally reuse stale state. Tests can pass <c>null</c> (or a no-op
-/// implementation) and the resolver will fall back to its legacy path.
+/// ambient <see cref="MergeResolverAgentContext"/>, invokes the resolver, and clears
+/// the ambient on the way out — all inside one async frame so the AsyncLocal context
+/// is actually visible to the resolver. Tests can pass <c>null</c> and
+/// <see cref="GitService.MergeTaskBranchAsync"/> will fall through to the bare
+/// resolver path (used by the stub resolver in <c>AutoReviewPipelineTests</c>).
 /// </summary>
 public interface IMergeResolverKickoff
 {
-    Task<IAsyncDisposable> BeginAsync(WorkItem wi, AgentTask task, CancellationToken ct);
+    Task<MergeResolutionResult> ResolveAsync(
+        WorkItem wi,
+        AgentTask task,
+        string worktreePath,
+        CancellationToken ct);
 }
 
 public partial class GitService
@@ -219,22 +224,15 @@ public partial class GitService
         _log.LogWarning("Merge of {TaskBranch} into {WorkItemBranch} hit conflicts; invoking resolver",
             taskBranch, workItemBranch);
 
-        // Per ADR 0001 and issue #66: when a kickoff hook is wired in (production path), the
-        // resolver runs as a PTY MergeResolver Agent in this very merge worktree. The hook
-        // creates the AgentRun row and populates the ambient MergeResolverAgentContext for
-        // the duration of the ResolveAsync call. In test paths (and any caller that didn't
-        // wire the hook in) the resolver falls back to its legacy one-shot CLI behaviour —
-        // both keep ResolveAsync's signature intact.
-        MergeResolutionResult resolution;
-        if (_mergeKickoff is not null)
-        {
-            await using var _ = await _mergeKickoff.BeginAsync(wi, task, ct);
-            resolution = await _resolver.ResolveAsync(mergePath, task.Title, ct);
-        }
-        else
-        {
-            resolution = await _resolver.ResolveAsync(mergePath, task.Title, ct);
-        }
+        // Per ADR 0001 and issue #66: in production the kickoff hook is wired in and runs
+        // the resolver itself — it owns the AgentRun allocation and the AsyncLocal context
+        // push, both of which have to happen in the same async frame as the resolver call
+        // for the AsyncLocal to actually be visible to the resolver. In test paths (and any
+        // caller that didn't wire the hook in) we fall through to the bare resolver, which
+        // is fine because those tests use a stub resolver that doesn't read the context.
+        var resolution = _mergeKickoff is not null
+            ? await _mergeKickoff.ResolveAsync(wi, task, mergePath, ct)
+            : await _resolver.ResolveAsync(mergePath, task.Title, ct);
 
         if (resolution.Success && await IsMergeFinalizedAsync(mergePath, ct))
         {
