@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { FileText, GitMerge, GitBranch, FolderGit2, ListTodo, RefreshCw, Plus, Settings, Bot, X, AlertCircle, Loader2 } from 'lucide-react';
+import { FileText, GitMerge, GitBranch, FolderGit2, ListTodo, RefreshCw, Plus, Settings, Bot, X, AlertCircle, Loader2, Flame, ShieldCheck, GitPullRequestArrow, Wand2 } from 'lucide-react';
 import { useAgentSessions } from '@/contexts/AgentSessionsContext';
 import { useSidebarAgents, type SidebarAgent } from '@/contexts/SidebarAgentsContext';
 import {
@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { useSources } from '@/contexts/SourcesContext';
-import { AgentRunKindLabel, SourceType } from '@/types';
+import { AgentRunKind, AgentRunKindLabel, SourceType } from '@/types';
 import { api } from '@/api';
 import { useState } from 'react';
 
@@ -162,17 +162,30 @@ export function AppSidebar() {
   );
 }
 
+// Per CONTEXT.md → "Role": each Agent's role has its own icon + accent colour in the
+// sidebar so the live tree is scannable. Failure-state still wins (red AlertCircle) regardless
+// of role; the per-role styling applies to the live indicator.
+const roleStyle: Record<AgentRunKind, { Icon: typeof Loader2; className: string }> = {
+  [AgentRunKind.TaskAgent]: { Icon: Loader2, className: 'animate-spin opacity-60' },
+  [AgentRunKind.Triage]: { Icon: Wand2, className: 'text-blue-500' },
+  [AgentRunKind.AutoReview]: { Icon: ShieldCheck, className: 'text-emerald-500' },
+  [AgentRunKind.Grill]: { Icon: Flame, className: 'text-orange-500' },
+  [AgentRunKind.MergeResolver]: { Icon: GitPullRequestArrow, className: 'text-purple-500' },
+};
+
 function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss: () => void }) {
   const failed = agent.lifecycle === 'failed';
   const label = AgentRunKindLabel[agent.kind] ?? 'Agent';
-  const Icon = failed ? AlertCircle : Loader2;
+  const style = roleStyle[agent.kind] ?? roleStyle[AgentRunKind.TaskAgent];
+  const Icon = failed ? AlertCircle : style.Icon;
+  const iconClass = failed ? 'text-destructive' : style.className;
   const exitSuffix = failed && agent.exitCode !== null ? ` (exit ${agent.exitCode})` : '';
 
   return (
     <SidebarMenuSubItem>
       <NavLink to={`/workitems/${agent.workItemId}?runId=${agent.runId}`} className="flex-1 min-w-0">
         <SidebarMenuSubButton title={`${label} — ${agent.workItemTitle}\n${agent.statusLine}${exitSuffix}`}>
-          <Icon className={`h-3 w-3 shrink-0 ${failed ? 'text-destructive' : 'animate-spin opacity-60'}`} />
+          <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
           <div className="flex flex-col items-start min-w-0 leading-tight">
             <span className="truncate text-[12px]">
               {label} {agent.workItemExternalId ? `#${agent.workItemExternalId}` : ''}
