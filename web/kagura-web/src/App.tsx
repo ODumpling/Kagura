@@ -4,6 +4,7 @@ import { WorkItemsPage } from '@/pages/WorkItemsPage';
 import { WorkItemDetailPage } from '@/pages/WorkItemDetailPage';
 import { TaskDetailPage } from '@/pages/TaskDetailPage';
 import { AgentsPage } from '@/pages/AgentsPage';
+import { PromptsPage } from '@/pages/PromptsPage';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Separator } from '@/components/ui/separator';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -18,7 +19,7 @@ import './App.css';
 
 function AppMain() {
   const location = useLocation();
-  const fullWidth = location.pathname.startsWith('/agents');
+  const fullWidth = location.pathname.startsWith('/agents') || location.pathname.startsWith('/prompts');
   const mainClass = `flex flex-1 flex-col p-6 w-full min-h-0${fullWidth ? '' : ' max-w-[1400px]'}`;
   return (
     <main className={mainClass}>
@@ -29,6 +30,7 @@ function AppMain() {
         <Route path="/workitems/:id" element={<WorkItemDetailPage />} />
         <Route path="/workitems/:workItemId/tasks/:taskId" element={<TaskDetailPage />} />
         <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/prompts" element={<PromptsPage />} />
       </Routes>
     </main>
   );
