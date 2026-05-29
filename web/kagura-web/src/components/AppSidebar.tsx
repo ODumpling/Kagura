@@ -181,6 +181,13 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
   const Icon = failed ? AlertCircle : style.Icon;
   const iconClass = failed ? 'text-destructive' : style.className;
   const exitSuffix = failed && agent.exitCode !== null ? ` (exit ${agent.exitCode})` : '';
+  const primary = agent.taskTitle ?? `${label}${agent.workItemExternalId ? ` #${agent.workItemExternalId}` : ''}`;
+  // TaskAgent rows deep-link to the task detail page so users land on the focused
+  // view (title, status, branch/worktree, live terminal). Other roles still drop
+  // the user on the work item.
+  const to = agent.kind === AgentRunKind.TaskAgent && agent.taskId
+    ? `/workitems/${agent.workItemId}/tasks/${agent.taskId}?runId=${agent.runId}`
+    : `/workitems/${agent.workItemId}?runId=${agent.runId}`;
 
   const { sessions, stop } = useAgentSessions();
   const [open, setOpen] = useState(false);
@@ -213,27 +220,40 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
     finally { setStopping(false); }
   }
 
+  // TaskAgent rows deep-link to the task detail page (issue #84) so users land on
+  // a focused view with branch/worktree + live terminal. All other roles open the
+  // terminal dialog in place (per #85) since they don't have a dedicated page.
+  const isTaskAgentRow = agent.kind === AgentRunKind.TaskAgent && !!agent.taskId;
+  const tooltip = `${label} — ${agent.workItemTitle}${agent.taskTitle ? `\n${agent.taskTitle}` : ''}\n${agent.statusLine}${exitSuffix}`;
+
   return (
     <SidebarMenuSubItem>
-      <SidebarMenuSubButton
-        asChild
-        title={`${label} — ${agent.workItemTitle}\n${agent.statusLine}${exitSuffix}`}
-      >
-        <button
-          type="button"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(true); }}
-          className="flex-1 min-w-0 text-left"
-        >
-          <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
-          <div className="flex flex-col items-start min-w-0 leading-tight">
-            <span className="truncate text-[12px]">
-              {label} {agent.workItemExternalId ? `#${agent.workItemExternalId}` : ''}
-            </span>
-            <span className="truncate text-[10px] text-muted-foreground max-w-[10rem]">
-              {failed ? `failed${exitSuffix}` : agent.statusLine}
-            </span>
-          </div>
-        </button>
+      <SidebarMenuSubButton asChild title={tooltip}>
+        {isTaskAgentRow ? (
+          <NavLink to={to} className="flex-1 min-w-0">
+            <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
+            <div className="flex flex-col items-start min-w-0 leading-tight">
+              <span className="truncate text-[12px] max-w-[10rem]">{primary}</span>
+              <span className="truncate text-[10px] text-muted-foreground max-w-[10rem]">
+                {failed ? `failed${exitSuffix}` : agent.statusLine}
+              </span>
+            </div>
+          </NavLink>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(true); }}
+            className="flex-1 min-w-0 text-left"
+          >
+            <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
+            <div className="flex flex-col items-start min-w-0 leading-tight">
+              <span className="truncate text-[12px] max-w-[10rem]">{primary}</span>
+              <span className="truncate text-[10px] text-muted-foreground max-w-[10rem]">
+                {failed ? `failed${exitSuffix}` : agent.statusLine}
+              </span>
+            </div>
+          </button>
+        )}
       </SidebarMenuSubButton>
       {failed && (
         <button

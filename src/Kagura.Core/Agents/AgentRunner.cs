@@ -194,8 +194,25 @@ public class AgentRunner : IAgentRunner
             {
                 _ = _broadcaster.ExitAsync(runId, code);
                 _ = RecordExitAsync(runId, code);
+                // Clean exit → drop from sidebar. Failure → linger so the user can see the
+                // failed row and dismiss it with the X affordance (mirrors the non-task path).
+                if (code == 0)
+                    _ = _broadcaster.AgentDismissedAsync(runId);
                 Cleanup(runId);
             };
+
+            await _broadcaster.AgentAppearedAsync(new AgentSidebarEvent(
+                RunId: runId,
+                WorkItemId: wi.Id,
+                SourceId: wi.SourceId,
+                SourceName: wi.Source?.Name ?? "",
+                WorkItemTitle: wi.Title,
+                WorkItemExternalId: wi.ExternalId,
+                Kind: AgentRunKind.TaskAgent,
+                StatusLine: DefaultStatusLineFor(Role.Task),
+                StartedAt: session.StartedAt,
+                TaskId: task.Id,
+                TaskTitle: task.Title));
 
             _log.LogInformation("Started agent run {RunId} for task {TaskId} in {Cwd}", runId, task.Id, worktreePath);
             return session;

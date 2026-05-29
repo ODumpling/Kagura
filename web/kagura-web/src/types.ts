@@ -206,6 +206,8 @@ export interface AgentSidebarEventDto {
   kind: AgentRunKind;
   statusLine: string;
   startedAt: string;
+  taskId: string | null;
+  taskTitle: string | null;
 }
 
 export interface AgentRunDto {

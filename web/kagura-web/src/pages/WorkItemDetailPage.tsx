@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Sparkles, CheckCheck, Loader2, GitPullRequest, ExternalLink, Play, ScanSearch, Bot, OctagonX, AlertTriangle, ChevronDown, Terminal as TerminalIcon, MessageCircle, Settings, RotateCcw, Hourglass } from 'lucide-react';
 import { api } from '@/api';
 import { getConnection } from '@/signalr';
@@ -36,6 +36,7 @@ const wiStatusVariant: Record<WorkItemStatus, 'secondary' | 'default' | 'outline
 export function WorkItemDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [item, setItem] = useState<WorkItemDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -43,6 +44,7 @@ export function WorkItemDetailPage() {
   const [terminalRunId, setTerminalRunId] = useState<string | null>(null);
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
   const { sessions: allSessions, refresh: refreshSessions, modalRequest, clearModalRequest } = useAgentSessions();
+  const consumedRunIdRef = useRef<string | null>(null);
 
   const reloadRuns = useCallback(async () => {
     try {
@@ -90,6 +92,29 @@ export function WorkItemDetailPage() {
     return map;
   }, [itemRuns, runs]);
   const dialogRun = terminalRunId ? allRunsByRunId[terminalRunId] ?? null : null;
+
+  // Honor the `?runId=` query param — sidebar TaskAgent rows link here with the
+  // runId so the live terminal dialog auto-opens. Wait for the run to land in
+  // the active map (sessions feed in via SignalR + the listActive fetch). Only
+  // consume each runId once so closing the dialog doesn't immediately re-open it.
+  const urlRunId = searchParams.get('runId');
+  useEffect(() => {
+    if (!urlRunId) { consumedRunIdRef.current = null; return; }
+    if (consumedRunIdRef.current === urlRunId) return;
+    if (allRunsByRunId[urlRunId]) {
+      consumedRunIdRef.current = urlRunId;
+      setTerminalRunId(urlRunId);
+    }
+  }, [urlRunId, allRunsByRunId]);
+
+  const closeTerminal = useCallback(() => {
+    setTerminalRunId(null);
+    if (searchParams.has('runId')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('runId');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Subscribe to real-time work-item updates over SignalR.
   useEffect(() => {
@@ -636,7 +661,7 @@ export function WorkItemDetailPage() {
       <AgentTerminalDialog
         run={dialogRun}
         busy={busy === dialogRun?.runId}
-        onClose={() => setTerminalRunId(null)}
+        onClose={closeTerminal}
         onStop={stopRunById}
       />
     </div>
