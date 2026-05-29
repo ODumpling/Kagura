@@ -238,10 +238,14 @@ public class AgentRunner : IAgentRunner
             Rows = 32,
             Cwd = cwd,
             App = _opts.ClaudeBinary,
+            // claude's `--mcp-config <configs...>` is variadic — if it's the last flag
+            // before the positional prompt, commander.js eats the prompt as a second
+            // config path and claude exits with `ENAMETOOLONG`. Keep `--mcp-config`
+            // before a non-variadic flag so the variadic terminates cleanly.
             CommandLine = new[]
             {
-                "--permission-mode", "auto",
                 "--mcp-config", mcpConfigPath,
+                "--permission-mode", "auto",
                 prompt,
             },
             Environment = BuildRoleEnv(wi, role),
