@@ -180,16 +180,18 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
   const Icon = failed ? AlertCircle : style.Icon;
   const iconClass = failed ? 'text-destructive' : style.className;
   const exitSuffix = failed && agent.exitCode !== null ? ` (exit ${agent.exitCode})` : '';
+  const primary = agent.taskTitle ?? `${label}${agent.workItemExternalId ? ` #${agent.workItemExternalId}` : ''}`;
+  const to = agent.taskId
+    ? `/workitems/${agent.workItemId}/tasks/${agent.taskId}?runId=${agent.runId}`
+    : `/workitems/${agent.workItemId}?runId=${agent.runId}`;
 
   return (
     <SidebarMenuSubItem>
-      <SidebarMenuSubButton asChild title={`${label} — ${agent.workItemTitle}\n${agent.statusLine}${exitSuffix}`}>
-        <NavLink to={`/workitems/${agent.workItemId}?runId=${agent.runId}`} className="flex-1 min-w-0">
+      <SidebarMenuSubButton asChild title={`${label} — ${agent.workItemTitle}${agent.taskTitle ? `\n${agent.taskTitle}` : ''}\n${agent.statusLine}${exitSuffix}`}>
+        <NavLink to={to} className="flex-1 min-w-0">
           <Icon className={`h-3 w-3 shrink-0 ${iconClass}`} />
           <div className="flex flex-col items-start min-w-0 leading-tight">
-            <span className="truncate text-[12px]">
-              {label} {agent.workItemExternalId ? `#${agent.workItemExternalId}` : ''}
-            </span>
+            <span className="truncate text-[12px]">{primary}</span>
             <span className="truncate text-[10px] text-muted-foreground max-w-[10rem]">
               {failed ? `failed${exitSuffix}` : agent.statusLine}
             </span>
