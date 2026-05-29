@@ -309,7 +309,10 @@ public class AgentRunner : IAgentRunner
                 _log.LogInformation("Agent run {RunId} submitted via MCP", runId);
 
                 // Successful submission — kill the PTY so the user doesn't see it linger,
-                // then auto-dismiss from the sidebar.
+                // then auto-dismiss from the sidebar. Mark the exit reason BEFORE disposing
+                // so the sink's RecordExitAsync (fired from OnExit) sees CompletedCleanly
+                // rather than inferring Crashed from the missing AwaitingReview task signal.
+                _exitOverrides.TryAdd(runId, AgentExitReason.CompletedCleanly);
                 await session.DisposeAsync();
                 _sessions.TryRemove(runId, out _);
                 await _broadcaster.AgentDismissedAsync(runId);
