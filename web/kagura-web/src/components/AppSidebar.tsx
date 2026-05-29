@@ -181,7 +181,10 @@ function SidebarAgentNode({ agent, onDismiss }: { agent: SidebarAgent; onDismiss
   const iconClass = failed ? 'text-destructive' : style.className;
   const exitSuffix = failed && agent.exitCode !== null ? ` (exit ${agent.exitCode})` : '';
   const primary = agent.taskTitle ?? `${label}${agent.workItemExternalId ? ` #${agent.workItemExternalId}` : ''}`;
-  const to = agent.taskId
+  // TaskAgent rows deep-link to the task detail page so users land on the focused
+  // view (title, status, branch/worktree, live terminal). Other roles still drop
+  // the user on the work item.
+  const to = agent.kind === AgentRunKind.TaskAgent && agent.taskId
     ? `/workitems/${agent.workItemId}/tasks/${agent.taskId}?runId=${agent.runId}`
     : `/workitems/${agent.workItemId}?runId=${agent.runId}`;
 
